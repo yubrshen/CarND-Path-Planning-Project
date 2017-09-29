@@ -63,7 +63,7 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
   /*
     maps_x, and maps_y are the {x, y}-coordinates of the waypoints.
     returns the next waypoint relative to the point (x, y) in terms of the index of waypoints.
-   */
+    */
   int closestWaypoint = ClosestWaypoint(x, y, maps_x, maps_y);
 
   double map_x = maps_x[closestWaypoint];
@@ -149,10 +149,14 @@ vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> m
 
 	return {x, y};
 }
+int lane_width = 4;
+// assume the lane_index start from 0, from the right most to the left most
 int lane_center_d(int lane_index) {
-  int lane_width = 4;
-  // assume the lane_index start from 0, from the right most to the left most
   return (lane_index + 0.5)*lane_width;
+}
+
+bool within_lane(int lane, double d) {
+  return (lane*lane_width < d) && (d < (lane+1)*lane_width);
 }
 
 int main() {
@@ -226,10 +230,36 @@ int main() {
 
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             int prev_size = previous_path_x.size();
-            double dist_inc = 0.5;
             int lane_index = 1; // starting from 0, from the right most to the left most, in US highway.
             double ref_val = 49.5; // mph the top speed allowed
             
+            // avoid rear collision
+            if (0 < prev_size) { // replace car_s
+              car_s = end_path_s;
+             }
+            bool too_close = false;
+            // find ref_v to use
+            
+            for (size_t i = 0; i < sensor_fusion.size(); i++) {
+              // car in in my lane
+              float d = sensor_fusion[i][6]; // the format of sensor_fusion data: vector of vector of ?, ?, ?, vx, vy, s, d
+              if (within_lane(lane_index, d)) {
+                double vx = sensor_fusion[i][3];
+                double vy = sensor_fusion[i][4];
+                double another_car_speed = sqrt(vx*vx + vy*vy);
+                double another_car_projected_s =
+                  (double)sensor_fusion[i][5] + ((double)prev_size*0.02*another_car_speed); // the position of the other car in the slight future
+                // The following logic seems not quite accurate, the future position of the other car compared with my car's future position (end_path_s)
+                if ((car_s < another_car_projected_s) && ((another_car_projected_s - car_s) < 30)) { // the other car is in front, and too close, within 30 meters distance
+                  // lower reference velocity so my car dosen't crash into the car in front
+                  // could flag to try to change lane
+                  ref_val = 29.5; // mph
+                }
+              }
+             }
+            // end of rear collision
+            
+            double dist_inc = 0.5;
             double next_s = 0;
             double next_d = lane_center_d(lane_index);
             
@@ -326,7 +356,7 @@ int main() {
             
               // rotate and shift back to global coordinates
               x_point = (x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw));
-              y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw)); // should there be negative - in front of x_ref ?
+              y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw));
             
               x_point += ref_x;
               y_point += ref_y;
