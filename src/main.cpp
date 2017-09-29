@@ -157,7 +157,7 @@ int lane_center_d(int lane_index) {
 
 bool within_lane(int lane, double d) {
   return (lane*lane_width < d) && (d < (lane+1)*lane_width);
-}
+ }
 
 int main() {
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
@@ -193,9 +193,11 @@ int main() {
     	map_waypoints_dx.push_back(d_x);
     	map_waypoints_dy.push_back(d_y);
     }
-
+  double speed_limit = 49.5; // mph the top speed allowed
+  double ref_val = 0.0; // initial
   uWS::Hub h;
-  h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy]
+  h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,
+  &speed_limit, &ref_val]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -231,7 +233,6 @@ int main() {
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             int prev_size = previous_path_x.size();
             int lane_index = 1; // starting from 0, from the right most to the left most, in US highway.
-            double ref_val = 49.5; // mph the top speed allowed
             
             // avoid rear collision
             if (0 < prev_size) { // replace car_s
@@ -253,11 +254,23 @@ int main() {
                 if ((car_s < another_car_projected_s) && ((another_car_projected_s - car_s) < 30)) { // the other car is in front, and too close, within 30 meters distance
                   // lower reference velocity so my car dosen't crash into the car in front
                   // could flag to try to change lane
-                  ref_val = 29.5; // mph
+                  // ref_val = 29.5; // mph
+                  too_close = true;
                 }
               }
              }
             // end of rear collision
+            
+            // incremental acceleration/deacceleration
+            
+            if (too_close && (0 < ref_val)) {
+              ref_val -= 0.224; // roughly equivalent to deacceleration 5m/s^2
+              cout << "ref_val: " << ref_val << endl;
+             } else if (ref_val < speed_limit) {
+              ref_val += 0.224; // roughly equivalent to acceleration 5m/s^2
+              cout << "ref_val: " << ref_val << endl;
+             }
+            // end of acceleration/deacceleration
             
             double dist_inc = 0.5;
             double next_s = 0;
