@@ -35,12 +35,13 @@ const int NUM_LANES = 3;
 const double VEHICLE_LENGTH = 23.0; // meters, 23 meters is the maximum vehicle length, according to California highway standard
 const double BUFFER_ZONE = 0.5*VEHICLE_LENGTH;
 const double UPDATE_INTERVAL = 0.02; // seconds, the interval to update maneuver decision
+const double PLANNING_INTERVAL = 10*UPDATE_INTERVAL; // the interval for planning
 const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
-const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
-= MAX_ACCELERATION_METERS_PER_SECOND_SQUARE*UPDATE_INTERVAL;
+const double MAX_VELOCITY_DELTA_PRE_PLANNING_INTERVAL
+= MAX_ACCELERATION_METERS_PER_SECOND_SQUARE*PLANNING_INTERVAL;
 const double MAX_JERK_METERS_PER_SECOND_CUBIC = 10; // meter/s^3
-const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
-= MAX_JERK_METERS_PER_SECOND_CUBIC*UPDATE_INTERVAL;
+const double MAX_ACCELERATION_DELTA_METERS_PER_PLANNING_INTERVAL
+= MAX_JERK_METERS_PER_SECOND_CUBIC*PLANNING_INTERVAL;
 // const int JERK_SAMPLES_NUM = int(1/UPDATE_INTERVAL); // sample times in one second
 int initial_steps = 0; // 200, the intial steps without considering lane changing to stablize
 const double COLLISION_C  = .1E7f;
@@ -256,7 +257,7 @@ struct LaneData {
 
 typedef map<int, LaneData> DATA_LANES;
 typedef vector< vector<double> > SENSOR_FUSION;
-double projected_gap(CarDescription front, CarDescription behind, double delta_t = UPDATE_INTERVAL) {
+double projected_gap(CarDescription front, CarDescription behind, double delta_t = PLANNING_INTERVAL) {
   // ignore accelerations, assuming they are 0, to simplify
   return front.s - behind.s + (front.v - behind.v)*delta_t - VEHICLE_LENGTH;
 }
@@ -327,13 +328,13 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion)
       data_lanes[lane].gap_behind = INDEFINIT_FUTURE; // extremely large
     } else {
       data_lanes[lane].gap_behind =
-        projected_gap(my_car, data_lanes[lane].nearest_back, UPDATE_INTERVAL);
+        projected_gap(my_car, data_lanes[lane].nearest_back, PLANNING_INTERVAL);
     }
     if (data_lanes[lane].nearest_front.empty) {
       data_lanes[lane].gap_front = INDEFINIT_FUTURE; // extremely large
     } else {
       data_lanes[lane].gap_front =
-        projected_gap(data_lanes[lane].nearest_front, my_car, UPDATE_INTERVAL);
+        projected_gap(data_lanes[lane].nearest_front, my_car, PLANNING_INTERVAL);
     }
   }
   return data_lanes;
@@ -356,11 +357,11 @@ typename T::iterator min_map_element(T& m) {
 // }
 
 double const ONE_OVER_INTERVAL_SQUARE =
-  1/(UPDATE_INTERVAL*UPDATE_INTERVAL);
+  1/(PLANNING_INTERVAL*PLANNING_INTERVAL);
 double const ONE_OVER_INTERVAL =
-  1/UPDATE_INTERVAL;
+  1/PLANNING_INTERVAL;
 double const ACCELERATION_ALLOW_PER_JERK_LIMIT =
-  MAX_JERK_METERS_PER_SECOND_CUBIC*UPDATE_INTERVAL;
+  MAX_JERK_METERS_PER_SECOND_CUBIC*PLANNING_INTERVAL;
 
 
 // Decision lane_keep_decision(CarDescription my_car, DATA_LANES data_lanes, int lane_changed_to) {
@@ -386,10 +387,10 @@ double const ACCELERATION_ALLOW_PER_JERK_LIMIT =
 // }
 double acceleration_required_in_front
 (CarDescription my_car, DATA_LANES data_lanes, int lane_changed_to) {
-  double extra_speed_allowed = SPEED_LIMIT - my_car.v;
+  double extra_speed_allowed = SPEED_LIMIT - my_car.v ? (my_car.v < SPEED_LIMIT) : 0;
   double speed_limit_allowed_acceleration =
     extra_speed_allowed*ONE_OVER_INTERVAL;
-  double feasible_acceleration;
+  double feasible_acceleration = 0;
   if (data_lanes[lane_changed_to].nearest_front.empty) {
     feasible_acceleration = speed_limit_allowed_acceleration;
     // effective no consideration of the car in frontfs
@@ -518,7 +519,7 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
 }
 double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   // double cost = 0;
-  double projected_v = (my_car.v + decision.projected_acceleration*UPDATE_INTERVAL);
+  double projected_v = (my_car.v + decision.projected_acceleration*PLANNING_INTERVAL);
   if ((projected_v <= NEAR_ZERO) ||
       (!data_lanes[decision.lane_index_changed_to].nearest_front.empty &&
        (data_lanes[decision.lane_index_changed_to].gap_front <= NEAR_ZERO)) ||
@@ -538,7 +539,7 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   return 0.0;
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car,DATA_LANES data_lanes) {
-  double projected_v = (my_car.v + decision.projected_acceleration*UPDATE_INTERVAL);
+  double projected_v = (my_car.v + decision.projected_acceleration*PLANNING_INTERVAL);
   double cost = pow((SPEED_LIMIT - projected_v)/SPEED_LIMIT, 2);
   return cost;
 }
@@ -650,7 +651,7 @@ int main() {
     	map_waypoints_dx.push_back(d_x);
     	map_waypoints_dy.push_back(d_y);
     }
-  double ref_val = MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL; // initial
+  double ref_val = MAX_VELOCITY_DELTA_PRE_PLANNING_INTERVAL; // initial
   CarDescription my_car;
   my_car.a = 0;
   my_car.jerk = 0;
@@ -750,7 +751,7 @@ int main() {
               cout << ", next lane: " << decision.lane_index_changed_to;
               cout << " prev lane: " << my_car.lane_index; // << endl;
             
-              ref_val = decision.projected_acceleration*UPDATE_INTERVAL + my_car.v;
+              ref_val = decision.projected_acceleration*PLANNING_INTERVAL + my_car.v;
               cout << "new speed: " << ref_val;
             
               // if (((0 < decision.velocity_delta) && (ref_val < SPEED_LIMIT)) ||
@@ -763,7 +764,7 @@ int main() {
              } else {
               if (ref_val < SPEED_LIMIT) {
               // need to review the following
-                ref_val += MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL;
+                ref_val += MAX_VELOCITY_DELTA_PRE_PLANNING_INTERVAL;
               }
               initial_steps -= 1;
              }
@@ -893,7 +894,7 @@ int main() {
             const int plan_length = 50;
             for (size_t i = 1; i <= plan_length - (previous_path_x.size() - start_using_previous_path); i++) {
               // double num_equal_segments = (target_dist/(UPDATE_INTERVAL*ref_val/2.24));
-              double num_equal_segments = (target_dist/(UPDATE_INTERVAL*ref_val));
+              double num_equal_segments = (target_dist/(PLANNING_INTERVAL*ref_val));
               // conversion between mile and kilometer
               double x_point = x_add_on+(target_x)/num_equal_segments;
               double y_point = spline(x_point);
