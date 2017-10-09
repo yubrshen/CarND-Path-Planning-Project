@@ -1,0 +1,137 @@
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS:
+#+LATEX_HEADER:
+#+LATEX_HEADER_EXTRA:
+#+DESCRIPTION:
+#+KEYWORDS:
+#+SUBTITLE:
+#+LATEX_COMPILER: pdflatex
+#+DATE: \today
+#+OPTIONS: toc:t
+#+AUTHOR: Aaron (Yu) Shen
+#+TITLE: THE REQUIRED ACCELERATION FOR A CAR TO AVOID COLLISION FROM BEHIND
+
+* Introduction
+
+  This is my notes to understand the model of the acceleration required for a car to avoid to be crashed from its behind.
+  There is some discussion of the understanding [[https://discussions.udacity.com/t/quiz-in-4-16-behavior-planner/362610/4][here]]. But it's not fully developed, to save my future confusion. I document
+  my understanding in details and permanently. The understanding might not be correct or appropriate. This very documentation
+  also serves the purpose of seeking correction and suggestion for improvement.
+
+* Assumptions
+
+  Let's call the car whose acceleration is calculated Ego, and the other car right behind Ego is called Behind. They are in the same lane.
+  - $t_0$ is when the acceleration to Ego would start to apply.
+  - $v_{Ego}$ is the velocity of Ego at the time $t_0$.
+  - $v_{Behind}$ is the velocity of the car Behind at $t_0$.
+  - $s_{Ego}$ is the position of Ego at time $t_0$
+  - $s_{Behind}$ is the position of the car Behind at the time $t_0$
+
+\begin{eqnarray}
+\label{eq:1}
+\delta_{v} & = & v_{Ego} - v_{Behind} \\
+\delta_{s} & = & s_{Ego} - s_{Behind}
+\end{eqnarray}
+
+For the sake of simplicity, let's assume the velocity of the Behind $v_{Behind}$ is constant for this discussion.
+The assumption may be accurate enough, as long as the scale of the duration in which the crash might happen from $t_0$ is small enough.
+This would be the situation when the Behind is within a few meters away behind Ego.
+
+- Let $s_{Behind}(t)$ and $s_{Ego}(t)$ are the positions of the Behind and of Ego at the time $t$ starting from $t_0$, respectively.
+- Let $a_{Ego}$ the acceleration of Ego required to avoid the crash at its back.
+- Let $v_{Ego}(t)$ the new velocity with acceleration $a_{Ego}$.
+By the definition, we have then
+
+\begin{eqnarray}
+\label{eq:4}
+ v_{Ego}(t) & = & v_{Ego} + a_{Ego} \cdot t
+\end{eqnarray}
+
+* Intuition and Problem Definition
+
+  If Ego's velocity is smaller than that of the Behind, eventually the Behind is going to catch up and crash into Ego.
+  To avoid to be crashed, Ego needs to speed up in time before the crash happens.
+
+  The problem is then what should be the acceleration $a_{Ego}$?
+  (For the purpose of studying the rear collision to car Ego, we assume the acceleration would be constant. We think the assumption is accurate enough for the purpose.)
+
+* Reason and Derivation
+
+  Based on the assumptions and by Kinematic equations for object with constant speed and
+  for object with constant acceleration, we have
+
+
+\begin{eqnarray}
+\label{eq:2}
+s_{Behind}(t) & = & s_{Behind} + v_{Behind} \cdot t   \\
+s_{Ego}(t) & = & s_{Ego} + v_{Ego} \cdot t + \frac{1}{2} \cdot a_{Ego} \cdot t^2
+\end{eqnarray}
+
+At some time $t$ when $s_{Behind}(t) < s_{Ego}(t)$ there will not be collision, as their are still gap between the two cars.
+However, when $s_{Behind}(t) \geq s_{Ego}(t)$, the car Behind runs into Ego!
+
+As $s_{Ego}(t)$ is an increasing function of $a$, the value of $a$ in the following
+
+\begin{eqnarray}
+\label{eq:3}
+s_{Behind}(t) & = & s_{Ego}(t)   \\
+s_{Behind} + v_{Behind} \cdot t & = & s_{Ego} + v_{Ego} \cdot t + \frac{1}{2} \cdot a_{Ego} \cdot t^2
+\end{eqnarray}
+
+would be the minimum value to avoid the crash.
+
+Also at the same time $t$, there must be that $v_{Behind} \leq v_{Ego}(t)$ in order to avoid potential future crash, as
+$v_{Ego}(t)$ is an increasing function of $t$, therefore, the value of $t$ satisfying the following:
+
+\begin{eqnarray}
+\label{eq:5}
+v_{Behind} & = & v_{Ego}(t) \\
+v_{Behind} & = & v_{Ego} + a_{Ego} \cdot t
+\end{eqnarray}
+
+would be the minimum value for $t$.
+
+Substituting $v_{Ego}(t)$ in equations (\ref{eq:5}), and basing on equations (\ref{eq:4}) and (\ref{eq:1}), we have the following
+
+\begin{eqnarray}
+\label{eq:6}
+v_{Behind} - v_{Ego} & = & a_{Ego} \cdot t \\
+-\delta_{v} & = & a_{Ego} \cdot t \\
+a_{Ego} & = & - \frac{\delta_{v}}{t}
+\end{eqnarray}
+
+Equation (\ref{eq:3}) may be rearranged based on the definitions of
+$\delta_{v}$ and $\delta_s$ in equation (\ref{eq:1}) as follows for ease of further derivation:
+
+\begin{eqnarray}
+\label{eq:9}
+ v_{Behind}  \cdot t - v_{Ego} \cdot t & = & s_{Ego} - s_{Behind} + \frac{1}{2} \cdot a_{Ego} \cdot t^2 \\
+-  \delta_{v} \cdot t & = & \delta_{s} + \frac{1}{2} \cdot a_{Ego} \cdot t^2
+\end{eqnarray}
+
+Substitute $a_{Ego}$ from equation (\ref{eq:6}) in equation (\ref{eq:9}), rearrange and simply it:
+
+\begin{eqnarray}
+\label{eq:7}
+-\delta_{v} \cdot t & = & \delta_{s} + \frac{1}{2} \cdot (- \frac{\delta_{v}}{t}) \cdot t^2 \\
+-\delta_{v} \cdot t & = & \delta_{s} - \frac{1}{2} \cdot {\delta_{v}} \cdot t \\
+-\delta_{v} \cdot t + \frac{1}{2} \cdot {\delta_{v}} \cdot t & = & \delta_{s} \\
+-\frac{1}{2} \cdot \delta_{v} \cdot t  & = & \delta_{s}\\
+t & = & -2 \cdot \frac{\delta_{s}}{\delta_{v}}
+\end{eqnarray}
+
+* Conclusion
+
+Repeating equations (\ref{eq:7}) and (\ref{eq:6}):
+
+\begin{eqnarray}
+\label{eq:8}
+t & = & -2 \cdot \frac{\delta_{s}}{\delta_{v}} \\
+a_{Ego} & = & - \frac{\delta_{v}}{t} \\
+a_{Ego} & = & - \frac{\delta_{v}}{-2 \cdot \frac{\delta_{s}}{\delta_{v}}} \\
+a_{Ego} & = & \frac{\delta_{v}^2}{2 \cdot {\delta_{s}}}
+\end{eqnarray}
+
+The above conclusion is derived from the major observations in equations (\ref{eq:3}) and (\ref{eq:5}):
+1. that the computed acceleration of $a_{Ego}$ at least will lead to at some time $t$, $s_{Ego}(t)$ to be equal or greater than $s_{Behind}(t)$
+2. and that the new speed of Ego $v_{Ego}(t)$ must be equal or greater to that of the car Behind $v_{Behind}$.
