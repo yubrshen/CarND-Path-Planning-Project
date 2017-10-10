@@ -254,30 +254,46 @@ struct LaneData {
   double gap_behind;
 };
 
-typedef map<int, LaneData> DATA_LANES;
+struct DATA_LANES {
+  map<int, LaneData> lanes;
+  bool car_to_left = false;
+  bool car_to_right = false;
+  bool car_just_ahead = false;
+};
+
 typedef vector< vector<double> > SENSOR_FUSION;
 double projected_gap(CarDescription front, CarDescription behind, double delta_t = UPDATE_INTERVAL) {
   // ignore accelerations, assuming they are 0, to simplify
   return front.s - behind.s + (front.v - behind.v)*delta_t - VEHICLE_LENGTH;
 }
 
-DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion) {
+void update_surronding(CarDescription my_car, double s_diff, int lane, DATA_LANES *data_lanes) {
+  if (s_diff < BUFFER_ZONE) {
+    switch (my_car.lane_index - lane) {
+    case 0:
+      data_lanes->car_just_ahead = true;
+      break;
+    case 1:
+      data_lanes->car_to_left = true;
+      break;
+    case -1:
+      data_lanes->car_to_right = true;
+    default:
+      break;
+    }}}
+
+DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion, double duration) {
   DATA_LANES data_lanes;
   for (int i = 0; i < NUM_LANES; i++) {
     LaneData lane_data;
-    data_lanes[i] = lane_data; // assume copy semantics
-    data_lanes[i].nearest_back.empty = true;
-    data_lanes[i].nearest_front.empty = true;
+    data_lanes.lanes[i] = lane_data; // assume copy semantics
+    data_lanes.lanes[i].nearest_back.empty = true;
+    data_lanes.lanes[i].nearest_front.empty = true;
   }
   // cout << "parse_sensor_data once" << endl;
 
   CarDescription a_car;
   for (auto data:sensor_fusion) {
-    // cout << "fusion_element: ";
-    // for (auto element:data) {
-    //   cout << element << ", ";
-    // }
-    // cout << endl;
     a_car.d  = data[6];
     if ((a_car.d < 0) || (lane_width*NUM_LANES < a_car.d)) {
       continue;
@@ -295,24 +311,24 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion)
 
     // cout << "a car at lane: " << a_car.lane_index;
     if (a_car.s <= my_car.s) {// there is a car behind
-      if (data_lanes[a_car.lane_index].nearest_back.empty) {
+      if (data_lanes.lanes[a_car.lane_index].nearest_back.empty) {
         // cout << ", first registration for nearest_back ";
-        data_lanes[a_car.lane_index].nearest_back       = a_car;
-        // data_lanes[a_car.lane_index].nearest_back.empty = false;
+        data_lanes.lanes[a_car.lane_index].nearest_back       = a_car;
+        // data_lanes.lanes[a_car.lane_index].nearest_back.empty = false;
       } else {
-        if (data_lanes[a_car.lane_index].nearest_back.s < a_car.s) {
-          data_lanes[a_car.lane_index].nearest_back = a_car;
+        if (data_lanes.lanes[a_car.lane_index].nearest_back.s < a_car.s) {
+          data_lanes.lanes[a_car.lane_index].nearest_back = a_car;
           // cout << ", update for nearest_back ";
         }}}
     if (my_car.s <= a_car.s) { // there is a car in front
-      if (data_lanes[a_car.lane_index].nearest_front.empty) {
+      if (data_lanes.lanes[a_car.lane_index].nearest_front.empty) {
         // cout << ", first registration for nearest_front ";
-        data_lanes[a_car.lane_index].nearest_front       = a_car;
-        // data_lanes[a_car.lane_index].nearest_front.empty = false;
+        data_lanes.lanes[a_car.lane_index].nearest_front       = a_car;
+        // data_lanes.lanes[a_car.lane_index].nearest_front.empty = false;
       } else {
-        if (a_car.s < data_lanes[a_car.lane_index].nearest_front.s) {
+        if (a_car.s < data_lanes.lanes[a_car.lane_index].nearest_front.s) {
           // cout << ", update for nearest_back ";
-          data_lanes[a_car.lane_index].nearest_front = a_car;
+          data_lanes.lanes[a_car.lane_index].nearest_front = a_car;
         }}}}
   // For only the legal lanes adjacent to my_car.lane_index,
   // compute the gap with the nearest front and behind respectively
@@ -323,17 +339,21 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion)
   if (right_lane < NUM_LANES) lanes_interested.push_back(right_lane);
 
   for (auto lane:lanes_interested) {
-    if (data_lanes[lane].nearest_back.empty) {
-      data_lanes[lane].gap_behind = INDEFINIT_FUTURE; // extremely large
+    if (data_lanes.lanes[lane].nearest_back.empty) {
+      data_lanes.lanes[lane].gap_behind = INDEFINIT_FUTURE; // extremely large
     } else {
-      data_lanes[lane].gap_behind =
-        projected_gap(my_car, data_lanes[lane].nearest_back, UPDATE_INTERVAL);
+      data_lanes.lanes[lane].gap_behind =
+        projected_gap(my_car, data_lanes.lanes[lane].nearest_back, duration);
+      double s_diff = fabs(my_car.s - data_lanes.lanes[lane].nearest_back.s);
+      update_surronding(my_car, s_diff, lane, &data_lanes);
     }
-    if (data_lanes[lane].nearest_front.empty) {
-      data_lanes[lane].gap_front = INDEFINIT_FUTURE; // extremely large
+    if (data_lanes.lanes[lane].nearest_front.empty) {
+      data_lanes.lanes[lane].gap_front = INDEFINIT_FUTURE; // extremely large
     } else {
-      data_lanes[lane].gap_front =
-        projected_gap(data_lanes[lane].nearest_front, my_car, UPDATE_INTERVAL);
+      data_lanes.lanes[lane].gap_front =
+        projected_gap(data_lanes.lanes[lane].nearest_front, my_car, duration);
+      double s_diff = fabs(my_car.s - data_lanes.lanes[lane].nearest_front.s);
+      update_surronding(my_car, s_diff, lane, &data_lanes);
     }
   }
   return data_lanes;
@@ -390,11 +410,11 @@ double acceleration_required_in_front
   double speed_limit_allowed_acceleration =
     extra_speed_allowed*ONE_OVER_INTERVAL;
   double feasible_acceleration;
-  if (data_lanes[lane_changed_to].nearest_front.empty) {
+  if (data_lanes.lanes[lane_changed_to].nearest_front.empty) {
     feasible_acceleration = speed_limit_allowed_acceleration;
     // effective no consideration of the car in frontfs
   } else {
-    double gap_front = data_lanes[lane_changed_to].gap_front;
+    double gap_front = data_lanes.lanes[lane_changed_to].gap_front;
     double available_room = gap_front - BUFFER_ZONE;
     feasible_acceleration =
       available_room*ONE_OVER_INTERVAL_SQUARE - my_car.v*ONE_OVER_INTERVAL;
@@ -420,12 +440,12 @@ double acceleration_required_in_front
 }
 double acceleration_required_behind
 (CarDescription my_car, DATA_LANES data_lanes, int lane_index) {
-  if (data_lanes[lane_index].nearest_back.empty) {
+  if (data_lanes.lanes[lane_index].nearest_back.empty) {
     return my_car.a; // no need to change
   } else {
-    double gap_behind = data_lanes[lane_index].gap_behind;
+    double gap_behind = data_lanes.lanes[lane_index].gap_behind;
     double delta_v =
-      my_car.v - data_lanes[lane_index].nearest_back.v;
+      my_car.v - data_lanes.lanes[lane_index].nearest_back.v;
     double min_acceleration_pushed_by_nearest_back =
       (delta_v*delta_v)/(2*gap_behind);
     double acceleration =
@@ -486,11 +506,11 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
   double front_collision_cost = 0;
   double behind_collision_cost = 0;
 
-  if (!data_lanes[decision.lane_index_changed_to].nearest_front.empty) {
+  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
     double a_f = 0.5*decision.projected_acceleration;
-    double b_f = my_car.v - data_lanes[decision.lane_index_changed_to].nearest_front.v;
+    double b_f = my_car.v - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
     double c_f = my_car.s
-      - data_lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
+      - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
     double front_collision_time = positive_minimum_solution(a_f, b_f, c_f);
     if (INDEFINIT_FUTURE <= front_collision_time) {
       front_collision_cost = 0;
@@ -500,11 +520,11 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
     front_collision_cost = 0;
   }
 
-  if (!data_lanes[decision.lane_index_changed_to].nearest_back.empty) {
+  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty) {
     double a_b = 0.5*decision.projected_acceleration;
-    double b_b = my_car.v - data_lanes[decision.lane_index_changed_to].nearest_back.v;
+    double b_b = my_car.v - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.v;
     double c_b = my_car.s
-      - data_lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
+      - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
     double behind_collision_time = positive_minimum_solution(a_b, b_b, c_b);
     if (INDEFINIT_FUTURE <= behind_collision_time) {
       behind_collision_cost = 0;
@@ -520,14 +540,14 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   // double cost = 0;
   double projected_v = (my_car.v + decision.projected_acceleration*UPDATE_INTERVAL);
   if ((projected_v <= NEAR_ZERO) ||
-      (!data_lanes[decision.lane_index_changed_to].nearest_front.empty &&
-       (data_lanes[decision.lane_index_changed_to].gap_front <= NEAR_ZERO)) ||
-      (!data_lanes[decision.lane_index_changed_to].nearest_back.empty &&
-       (data_lanes[decision.lane_index_changed_to].gap_behind <= NEAR_ZERO))) {
+      (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty &&
+       (data_lanes.lanes[decision.lane_index_changed_to].gap_front <= NEAR_ZERO)) ||
+      (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty &&
+       (data_lanes.lanes[decision.lane_index_changed_to].gap_behind <= NEAR_ZERO))) {
     return 10; // collision already
   } else {
-    if (!data_lanes[decision.lane_index_changed_to].nearest_front.empty) {
-      double time_away = data_lanes[decision.lane_index_changed_to].gap_front/projected_v;
+    if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
+      double time_away = data_lanes.lanes[decision.lane_index_changed_to].gap_front/projected_v;
       if (DESIRED_TIME_BUFFER < time_away) {
         return 0.0;
       } else {
@@ -556,17 +576,20 @@ Decision evaluate_decision(MANEUVER_STATE proposed_state, CarDescription my_car,
   return decision;
 }
 Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
-  vector<MANEUVER_STATE> states = {KL, LCL, LCR, PLCL, PLCR};
+  vector<MANEUVER_STATE> states = {KL};
+  //, LCL, LCR, PLCL, PLCR};
 
   // starting from 0, from the left most to the right most
-  if (my_car.lane_index == 0) {// no more left turn
-    vector_remove(states, LCL);
-    vector_remove(states, PLCL);
-  }
-  if (my_car.lane_index == NUM_LANES-1) {// no more right turn
-    vector_remove(states, LCR);
-    vector_remove(states, PLCR);
-  }
+  if (0 < my_car.lane_index) {// change to left lane possible
+    states.push_back(PLCL);
+    if (!data_lanes.car_to_left) {
+      states.push_back(LCL);
+    }}
+  if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
+    states.push_back(PLCR);
+    if (!data_lanes.car_to_right) {
+      states.push_back(LCR);
+    }}
   map<MANEUVER_STATE, Decision> decisions;
   for (auto proposed_state:states) {
     Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
@@ -681,6 +704,8 @@ int main() {
             double car_speed = j[1]["speed"]; // in mile per hour
 
             // Previous path data given to the Planner
+            // actually they are the remaining points of trajectory not yet visited by the car
+            // they are issued by the path planner to the car in the previous control time
             auto previous_path_x = j[1]["previous_path_x"];
             auto previous_path_y = j[1]["previous_path_y"];
             // Previous path's end s and d values
@@ -727,10 +752,10 @@ int main() {
             decision.maneuver = KL; // default
             if (initial_steps == 0) {
               cout.precision(2);
-              cout << "fr col: " << (!data_lanes[my_car.lane_index].nearest_front.empty &&
-                                     (data_lanes[my_car.lane_index].gap_front <= 0)) << ", ";
-              cout << "rr col: " << (!data_lanes[my_car.lane_index].nearest_back.empty &&
-                                     (data_lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
+              cout << "fr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_front.empty &&
+                                     (data_lanes.lanes[my_car.lane_index].gap_front <= 0)) << ", ";
+              cout << "rr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_back.empty &&
+                                     (data_lanes.lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
               decision = maneuver(my_car, data_lanes);
               // next_d = lane_center_d(decision.lane_index_changed_to);
               int shift_direction = 0;
@@ -759,7 +784,7 @@ int main() {
               //   // The above needs to be changed
               //   ref_val = decision.projected_acceleration + my_car.v; // ref_val might need to be converted back to mph
             
-              //data_lanes[decision.lane_index_changed_to].nearest_front.v;
+              //data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
              } else {
               if (ref_val < SPEED_LIMIT) {
               // need to review the following
