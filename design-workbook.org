@@ -344,9 +344,10 @@ string hasData(string s) {
   = MAX_JERK_METERS_PER_SECOND_CUBIC*PLANNING_INTERVAL;
   // const int JERK_SAMPLES_NUM = int(1/UPDATE_INTERVAL); // sample times in one second
   int initial_steps = 0; // 200, the intial steps without considering lane changing to stablize
-  const double COLLISION_C  = .1E7f;
-  const double DANGER_C     = .1E6f;
+  const double COLLISION_C  = .1E5f;
+  const double DANGER_C     = .1E4f;
   const double EFFICIENCY_C = .1E3f;
+  const double NOT_MIDDLE_C = .1E2f;
   const double NEAR_ZERO = .1E-3f;
   const double DESIRED_TIME_BUFFER = 3; // seconds, according to http://copradar.com/redlight/factors/
   const double INDEFINIT_FUTURE = .1E4f; // huge number for indefinite futrue time
@@ -721,7 +722,10 @@ Compute the decision should the maneuver is performed.
     double collision_cost = collision_cost_f(decision, my_car, data_lanes);
     double inefficiency_cost = inefficiency_cost_f(decision, my_car, data_lanes);
     double buffer_cost = buffer_cost_f(decision, my_car, data_lanes);
-    double cost = COLLISION_C*collision_cost + DANGER_C*buffer_cost + EFFICIENCY_C*inefficiency_cost;
+    double not_middle_cost = not_middle_cost_f(decision, my_car, data_lanes);
+    double cost = COLLISION_C*collision_cost + DANGER_C*buffer_cost
+      + EFFICIENCY_C*inefficiency_cost + NOT_MIDDLE_C*not_middle_cost;
+
     return cost;
   }
 #+END_SRC
@@ -830,6 +834,30 @@ The data required:
 - future speed of my_car with the maneuver, based on the projected acceleration
 - distance to the car in front, or behind (closest_approach), based on data_lanes
 - the time to collision, based on the projected acceleration and data_lanes
+
+
+*** not-middle-cost
+
+#+NAME:not-middle-cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double not_middle_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+    // favor the middle lane, to have more options to change lane when needed
+    return logistic(pow(decision.lane_index_changed_to - 2, 2));
+  }
+#+END_SRC
+
+*** logistic
+
+    Support function for cost functions
+#+NAME:logistic
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double logistic(double x) {
+    // returns a value between 0 and 1 for x in the range[0, infinity] and
+    // - 1 to 0 for x in the range[-infinity, infinity].
+    // Useful for cost functions.
+    return 2.0 / (1 + exp(-x)) - 1.0;
+    }
+#+END_SRC
 
 ** main
 
@@ -1235,9 +1263,11 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
   <<acceleration_required_in_front>>
   <<acceleration_required_behind>>
   <<project_maneuver>>
+  <<logistic>>
   <<collision_cost>>
   <<buffer_cost>>
   <<inefficiency_cost>>
+  <<not-middle-cost>>
   <<calculate_cost>>
   <<evaluate_decision>>
   <<maneuver>>

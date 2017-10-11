@@ -44,9 +44,10 @@ const double MAX_ACCELERATION_DELTA_METERS_PER_PLANNING_INTERVAL
 = MAX_JERK_METERS_PER_SECOND_CUBIC*PLANNING_INTERVAL;
 // const int JERK_SAMPLES_NUM = int(1/UPDATE_INTERVAL); // sample times in one second
 int initial_steps = 0; // 200, the intial steps without considering lane changing to stablize
-const double COLLISION_C  = .1E7f;
-const double DANGER_C     = .1E6f;
+const double COLLISION_C  = .1E5f;
+const double DANGER_C     = .1E4f;
 const double EFFICIENCY_C = .1E3f;
+const double NOT_MIDDLE_C = .1E2f;
 const double NEAR_ZERO = .1E-3f;
 const double DESIRED_TIME_BUFFER = 3; // seconds, according to http://copradar.com/redlight/factors/
 const double INDEFINIT_FUTURE = .1E4f; // huge number for indefinite futrue time
@@ -488,6 +489,12 @@ Decision project_maneuver(MANEUVER_STATE proposed_state, CarDescription my_car, 
   decision.maneuver = proposed_state;
   return decision;              // this decision's state needs to be evaluated
 }
+double logistic(double x) {
+  // returns a value between 0 and 1 for x in the range[0, infinity] and
+  // - 1 to 0 for x in the range[-infinity, infinity].
+  // Useful for cost functions.
+  return 2.0 / (1 + exp(-x)) - 1.0;
+  }
 double positive_minimum_solution(double a, double b, double c) {
   double d = b*b -4*a*c;
   double s1 = (-b + d)/(2*a);
@@ -563,11 +570,18 @@ double inefficiency_cost_f(Decision decision, CarDescription my_car,DATA_LANES d
   double cost = pow((SPEED_LIMIT - projected_v)/SPEED_LIMIT, 2);
   return cost;
 }
+double not_middle_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+  // favor the middle lane, to have more options to change lane when needed
+  return logistic(pow(decision.lane_index_changed_to - 2, 2));
+}
 double calculate_cost(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   double collision_cost = collision_cost_f(decision, my_car, data_lanes);
   double inefficiency_cost = inefficiency_cost_f(decision, my_car, data_lanes);
   double buffer_cost = buffer_cost_f(decision, my_car, data_lanes);
-  double cost = COLLISION_C*collision_cost + DANGER_C*buffer_cost + EFFICIENCY_C*inefficiency_cost;
+  double not_middle_cost = not_middle_cost_f(decision, my_car, data_lanes);
+  double cost = COLLISION_C*collision_cost + DANGER_C*buffer_cost
+    + EFFICIENCY_C*inefficiency_cost + NOT_MIDDLE_C*not_middle_cost;
+
   return cost;
 }
 
