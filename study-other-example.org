@@ -1,0 +1,1850 @@
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS:
+#+LATEX_HEADER:
+#+LATEX_HEADER_EXTRA:
+#+DESCRIPTION:
+#+KEYWORDS:
+#+SUBTITLE:
+#+LATEX_COMPILER: pdflatex
+#+DATE: \today
+
+#+TITLE: Study jeremy-shannon/CarND-Path-Planning-Project
+* Study README
+
+Very thoughtful and clearly written.
+
+Very impressive performance.
+
+* Domain model
+
+- vehicle
+- trajectory
+
+** Data flow (reverse)
+
+   Final output: next_{x, y}_vals, trajectory fed to simulator
+
+   previous_path_{x, y} (only the first subpath)^
+   coarse_{s, x, y}_traj ! interpolated_{x, y}_traj ^
+   pos_s ^ | s_dot (current speed) ^ | PATH_DT ^ | target_d (best_target[1][0]) -> v_incr -> interpolated_s_traj ^
+
+   last two points from first portion of the remaining trajectory | (best position, best_lane, and speed -> two points 30 meter, 60 meters ahead of the end of the adopted remaining trajectory in the target lane   -> seeds for trajectory ^
+   best maneuver (lane, speed, acceleration)^
+   cost of each maneuver^
+   possible maneuvers, and corresponding lane, speed, acceleration, and trajectory^ | predictions (other cars' trajectory)^
+   original input:
+   map_waypoints_{s, d, x, y, dx, dy} -> coarse_waypoints_{s, d, x, y, dx, dy} -> interpolated_waypoints_{s, d, x, y, dx, dy} ^ | telemetry input ^ | remaining trajectory ^
+* Study the main and entries for control
+
+#+NAME:main
+#+BEGIN_SRC C++ :noweb yes :tangle ../examples/CarND-Path-Planning-Project/src/main.cpp :exports none
+  <<preamble>>
+  <<ClosestWaypoint>>
+  <<NextWaypoint>>
+  <<getFrenet>>
+  <<getXY>>
+
+  int main() {
+    <<read-waypoints>>
+    h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy, &my_car, &log_file](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+                       uWS::OpCode opCode) {
+      // "42" at the start of the message means there's a websocket message event.
+      // The 4 signifies a websocket message
+      // The 2 signifies a websocket event
+      //auto sdata = string(data).substr(0, length);
+      //cout << sdata << endl;
+      if (length && length > 2 && data[0] == '4' && data[1] == '2') {
+
+        auto s = hasData(data);
+
+        if (s != "") {
+          auto j = json::parse(s);
+
+          string event = j[0].get<string>();
+
+          if (event == "telemetry") {
+            <<get-telemetry-data>>
+
+            json msgJson;
+
+            vector<double> next_x_vals;
+            vector<double> next_y_vals;
+
+            // // DEBUG
+            // cout << endl << "**************** ITERATION BEGIN ****************" << endl << endl;
+
+            ofstream single_iteration_log;
+            single_iteration_log.open("path_planning_log-single_iteration.csv");
+
+            <<prepare-coarse_waypoints>>
+
+            <<interpolate_points>>
+            <<determine-ego-car-parameters-construct-vehicle-object>>
+            <<generate-predictions-from-sensor-fusion-data>>
+            <<determine-best-trajectory>>
+            <<produce-new-path>>
+
+            msgJson["next_x"] = next_x_vals;
+            msgJson["next_y"] = next_y_vals;
+
+            auto msg = "42[\"control\","+ msgJson.dump()+"]";
+
+            //this_thread::sleep_for(chrono::milliseconds(1000));
+            ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+
+            single_iteration_log.close();
+          }
+        } else {
+          // Manual driving
+          std::string msg = "42[\"manual\",{}]";
+          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+        }
+      }
+    });
+
+    // We don't need this since we're not using HTTP but if it's removed the
+    // program
+    // doesn't compile :-(
+    h.onHttpRequest([](uWS::HttpResponse *res, uWS::HttpRequest req, char *data,
+                       size_t, size_t) {
+      const std::string s = "<h1>Hello world!</h1>";
+      if (req.getUrl().valueLength == 1) {
+        res->end(s.data(), s.length());
+      } else {
+        // i guess this should be done more gracefully?
+        res->end(nullptr, 0);
+      }
+    });
+
+    h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+      std::cout << "Connected!!!" << std::endl;
+
+      // DEBUG
+      for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 80; j++) {
+          cout << "#";
+        }
+        cout << endl;
+      }
+      cout << endl;
+    });
+
+    h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
+                           char *message, size_t length) {
+      ws.close();
+      std::cout << "Disconnected" << std::endl;
+    });
+
+    int port = 4567;
+    if (h.listen(port)) {
+      std::cout << "Listening to port " << port << std::endl;
+    } else {
+      std::cerr << "Failed to listen to port" << std::endl;
+      return -1;
+    }
+    h.run();
+
+    log_file.close();
+  }
+
+
+#+END_SRC
+
+** Code Segments
+
+The code mere are organized top down for ease of understanding.
+
+*** produce-new-path
+
+Begin by pushing the previous and next-to-last point from the subpath of the previous path for setting the
+spline.
+The previous point should be the first point in the returned trajectory, but because of
+imprecision, also add that point manually.
+
+Eventually, generate the new trajectory x, y in interpolated_x_traj, and interpolated_y_traj.
+
+Some annotations:
+
+pos_s is the s value of Ego at the current update car_s
+
+s_dot is car_speed converted to meters/second
+
+PATH_DT: #define PATH_DT 0.02 seconds, defined in ../examples/CarND-Path-Planning-Project/src/constants.h
+the update interval
+
+subpath_size: int subpath_size = min(PREVIOUS_PATH_POINTS_TO_KEEP, (int)previous_path_x.size());
+PREVIOUS_PATH_POINTS_TO_KEEP: #define PREVIOUS_PATH_POINTS_TO_KEEP 25; only take part of the previous_path,
+usually first part of it, the oldest ones from the last update cycle.
+
+angle: the heading angle of Ego in radius, or estimated from previous_path
+      #+NAME:produce-new-path
+      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+        // ********************* PRODUCE NEW PATH ***********************
+        // begin by pushing the last and next-to-last point from the previous path for setting the
+        // spline the last point should be the first point in the returned trajectory, but because of
+        // imprecision, also add that point manually
+
+        vector<double>
+        coarse_s_traj, coarse_x_traj, coarse_y_traj,
+        interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
+
+        double prev_s = pos_s - s_dot * PATH_DT;
+
+        // first two points of coarse trajectory, to ensure spline begins smoothly
+        if (subpath_size >= 2) {
+          coarse_s_traj.push_back(prev_s);
+          coarse_x_traj.push_back(previous_path_x[subpath_size-2]);
+          coarse_y_traj.push_back(previous_path_y[subpath_size-2]);
+
+          coarse_s_traj.push_back(pos_s);
+          coarse_x_traj.push_back(previous_path_x[subpath_size-1]);
+          coarse_y_traj.push_back(previous_path_y[subpath_size-1]);
+         } else {
+          double prev_s = pos_s - 1;
+          double prev_x = pos_x - cos(angle);
+          double prev_y = pos_y - sin(angle);
+
+          coarse_s_traj.push_back(prev_s);
+          coarse_x_traj.push_back(prev_x);
+          coarse_y_traj.push_back(prev_y);
+
+          coarse_s_traj.push_back(pos_s);
+          coarse_x_traj.push_back(pos_x);
+          coarse_y_traj.push_back(pos_y);
+         }
+
+        // last two points of coarse trajectory, use target_d and current s + 30,60
+        double target_s1 = pos_s + 30;
+        double target_d1 = best_target[1][0];
+        vector<double> target_xy1 = getXY(target_s1, target_d1, interpolated_waypoints_s, interpolated_waypoints_x, interpolated_waypoints_y);
+        double target_x1 = target_xy1[0];
+        double target_y1 = target_xy1[1];
+        coarse_s_traj.push_back(target_s1);
+        coarse_x_traj.push_back(target_x1);
+        coarse_y_traj.push_back(target_y1);
+
+        double target_s2 = target_s1 + 30;
+        double target_d2 = target_d1;
+        vector<double> target_xy2 = getXY(target_s2, target_d2, interpolated_waypoints_s, interpolated_waypoints_x, interpolated_waypoints_y);
+        double target_x2 = target_xy2[0];
+        double target_y2 = target_xy2[1];
+        coarse_s_traj.push_back(target_s2);
+        coarse_x_traj.push_back(target_x2);
+        coarse_y_traj.push_back(target_y2);
+
+        // // DEBUG
+        // cout << "****COARSE TRAJECTORIES****" << endl << "coarse s \tcoarse x \tcoarse y" << endl;
+        // for (int i = 0; i < coarse_s_traj.size(); i++) {
+        // 	cout << coarse_s_traj[i] << "\t\t" << coarse_x_traj[i] << "\t\t" << coarse_y_traj[i] << "\t\t" << endl;
+        // }
+        // cout << endl << "****INTERPOLATED S****" << endl << "a incr\t\tcur a\t\tv incr\t\tcur v\t\ts value" << endl;
+
+        // next s values
+        double target_s_dot = best_target[0][1];
+        double current_s = pos_s;
+        double current_v = s_dot;
+        double current_a = s_ddot;
+        for (int i = 0; i < (NUM_PATH_POINTS - subpath_size); i++) {
+          double v_incr, a_incr;
+          if (fabs(target_s_dot - current_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
+            v_incr = 0;
+          } else {
+            // // tried to be clever here
+            // if (current_a == MAX_INSTANTANEOUS_ACCEL) {
+            // 	a_incr = 0;
+            // } else {
+            // 	a_incr = (MAX_INSTANTANEOUS_ACCEL - current_a)/(fabs(MAX_INSTANTANEOUS_ACCEL - current_a)) *MAX_INSTANTANEOUS_JERK * 0.5 * PATH_DT;
+            // }
+            // current_a += a_incr;
+            // v_incr = (target_s_dot - current_v)/(fabs(target_s_dot - current_v)) * current_a * PATH_DT;
+
+            // arrived at VELOCITY_INCREMENT_LIMIT value empirically
+            v_incr = (target_s_dot - current_v)/(fabs(target_s_dot - current_v)) * VELOCITY_INCREMENT_LIMIT;
+          }
+          current_v += v_incr;
+          current_s += current_v * PATH_DT;
+          interpolated_s_traj.push_back(current_s);
+
+          // // DEBUG
+          // cout << a_incr << "\t\t" << current_a << "\t\t" << v_incr << "\t\t" << current_v << "\t\t" << interpolated_s_traj[i] << endl;
+         }
+
+        interpolated_x_traj = interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);
+        interpolated_y_traj = interpolate_points(coarse_s_traj, coarse_y_traj, interpolated_s_traj);
+
+        // // convert points from frenet trajectory to xy, skip the first point (included above)
+        // for (int i = 1; i < N_SAMPLES; i++) {
+        // 	traj_xy_point = getXY(frenet_traj[0][i], frenet_traj[1][i], interpolated_waypoints_s, interpolated_waypoints_x, interpolated_waypoints_y);
+        // 	//traj_xy_point = getXY(frenet_traj[0][i], frenet_traj[1][i], map_waypoints_s, map_waypoints_x, map_waypoints_y);
+        // 	best_x_traj.push_back(traj_xy_point[0]);
+        // 	best_y_traj.push_back(traj_xy_point[1]);
+        // }
+
+        // // interpolate to upsample x and y trajectories
+        // vector<double> coarse_times;
+        // // manually add times for first two points of spline (last two points of previous path)
+        // int extra_points = 0;
+        // if (subpath_size >= 2) {
+        // 	coarse_times.push_back(-0.02);
+        // 	coarse_times.push_back(0);
+        // 	extra_points = 2;
+        // }
+        // for (int i = 1; i < N_SAMPLES; i++) {
+        // 	coarse_times.push_back(i*duration/(N_SAMPLES-1));
+        // }
+        // interpolated_x_traj = interpolate_points(coarse_times, best_x_traj, PATH_DT, (NUM_PATH_POINTS - subpath_size + extra_points));
+        // interpolated_y_traj = interpolate_points(coarse_times, best_y_traj, PATH_DT, (NUM_PATH_POINTS - subpath_size + extra_points));
+
+        // add previous path, if any, to next path
+        for(int i = 0; i < subpath_size; i++) {
+          next_x_vals.push_back(previous_path_x[i]);
+          next_y_vals.push_back(previous_path_y[i]);
+         }
+        // add xy points from newly generated path
+        for (int i = 0; i < interpolated_x_traj.size(); i++) {
+          //if (subpath_size == 0 && i == 0) continue; // maybe skip start position as a path point?
+          next_x_vals.push_back(interpolated_x_traj[i]);
+          next_y_vals.push_back(interpolated_y_traj[i]);
+         }
+        // // add xy points from newly generated path
+        // for (int i = 0; i < (NUM_PATH_POINTS - subpath_size); i++) {
+        // 	//if (subpath_size == 0 && i == 0) continue; // maybe skip start position as a path point?
+        // 	next_x_vals.push_back(interpolated_x_traj[i + extra_points]);
+        // 	next_y_vals.push_back(interpolated_y_traj[i + extra_points]);
+        // }
+
+        // // DEBUG
+        // cout << "****TRAJECTORY DATA****" << endl;
+        // cout << "xy trajectory (spaced-out; i: x,y):" << endl;
+        // for (int i = 0; i < best_x_traj.size(); i++) {
+        // 	cout << best_x_traj[i] << ", " << best_y_traj[i] << endl;
+        // }
+        // cout << endl << endl;
+
+
+        /********************* simple, drive straight example *********************
+                  double dist_incr = 0.5;
+                  for(int i = 0; i < 50; i++) {
+                    next_x_vals.push_back(car_x+(dist_incr*i)*cos(deg2rad(car_yaw)));
+                    next_y_vals.push_back(car_y+(dist_incr*i)*sin(deg2rad(car_yaw)));
+                  }***************************************************************************/
+        /************************ drive in circles example ************************
+                  double dist_incr = 0.5;
+                  for(int i = 0; i < 50-subpath_size; i++) {
+                    next_x_vals.push_back(pos_x+(dist_incr)*cos(angle+(i+1)*(pi()/100)));
+                    next_y_vals.push_back(pos_y+(dist_incr)*sin(angle+(i+1)*(pi()/100)));
+                    pos_x += (dist_incr)*cos(angle+(i+1)*(pi()/100));
+                    pos_y += (dist_incr)*sin(angle+(i+1)*(pi()/100));
+                  }***************************************************************************/
+        /***************** drive along interpolated waypoints example ****************
+         // get next waypoint from current car position
+                  int next_waypoint_index_interpolated = NextWaypoint(pos_x, pos_y, angle, 																	interpolated_waypoints_x, interpolated_waypoints_y);
+                  for (int i = 0; i < 50 - subpath_size; i ++) {
+                    next_x_vals.push_back(interpolated_waypoints_x[next_waypoint_index_interpolated+i]);
+                    next_y_vals.push_back(interpolated_waypoints_y[next_waypoint_index_interpolated+i]);
+                  }******************************************************************************/
+
+        // // DEBUG
+        // cout << "subpath size: " << subpath_size << endl;
+
+        // cout << "full path (x,y):  \tprevious path (x,y):  \tinst vel:  \tinst acc:" << endl;
+        // // log_file << "t, full path x, full path y, prev path x, prev path y, inst vel, inst acc" << endl;
+        // for (int i = 0; i < next_x_vals.size(); i++) {
+        // 	cout << next_x_vals[i] << ", " << next_y_vals[i];
+        // 	// log_file << i * PATH_DT << ", " << next_x_vals[i] << ", " << next_y_vals[i] << ", ";
+        // 	if (i < previous_path_x.size()) {
+        // 		cout << "  \t" << previous_path_x[i] << ", " << previous_path_y[i];
+        // 		// log_file << previous_path_x[i] << ", " << previous_path_y[i] << ", ";
+        // 	}
+        // 	else {
+        // 		cout << "  \t\t\t";
+        // 		// log_file << ", , ";
+        // 	}
+        // 	if (i > 0) {
+        // 		double vel = sqrt(pow(next_x_vals[i] - next_x_vals[i-1], 2) + pow(next_y_vals[i] - next_y_vals[i-1], 2)) / PATH_DT;
+        // 		cout << "  \t" << vel;
+        // 		// log_file << vel << ", ";
+        // 		if (i > 1) {
+        // 			double vel2 = sqrt(pow(next_x_vals[i-1] - next_x_vals[i-2], 2) + pow(next_y_vals[i-1] - next_y_vals[i-2], 2)) / PATH_DT;
+        // 			double acc = (vel - vel2) / PATH_DT;
+        // 			cout << "  \t" << acc;
+        // 			// log_file << acc;
+        // 		}
+        // 	}
+        // 	if (i == PREVIOUS_PATH_POINTS_TO_KEEP-1) {
+        // 			cout << "\t\tEND OF KEPT PREVIOUS PATH POINTS";
+        // 	}
+        // 	cout << endl;
+        // 	// log_file << endl;
+        // }
+        // cout << endl << endl;
+        // // log_file << endl;
+#+END_SRC
+
+
+**** The seeds of spline:
+
+***** Generate 4 points in coarse traj
+
+ first two points: if previous_path has two more points, use the last two from it,
+ otherwise use the current observation of Ego, and estimated its previous point by the heading angle.
+ Note, the pos_s has been modified to corresponds to the endpoint of the subpath
+
+ The other two points are generated by using best_target for the appropriate d, whether there should be a lane change or not.
+
+ best_target is produced selecting among those generated by get_target_for_state, for the lowest cost.
+ here it just use the best_target for the target lane (d).
+
+ The 3rd point is obtained from pos_s + 30
+ The 4th point of the seed is with 30 meters further from the 3rd point (i.e. pos_s + 30 + 30), with the same d value.
+
+ The 3rd and 4th points' x, y value are obtained from getXY using interpolated_waypoints
+
+**** use coarse traj from s to x, and from s to y with spline, then use the s intervals to generate the corresponding x, y points'
+     Very clever!
+
+**** get_target_for_state
+
+ get_target_for_state: compute the target, i.e. idea values, for the situation
+ for s, s_d, s_dd, and d, d_d, d_dd, given the state, the predictions, duration, and if a car is right in front
+
+first compute as if there is no car in front,
+
+ s_d = SPEED_LIMIT; // by default
+ s = this->s + (this->s_d + target_s_d) / 2 * duration // the average speed, I used a more accurate kinematic equation
+ s_dd = 0
+
+ d is determined by the lane changing logic
+ d_d = 0
+ d_dd = 0
+
+ with car in front,
+ adjust the
+ s_d to be that of the vehicle in front, if it's too close, further slowdown by 1 m/s.
+ target_s, forced to be leading_vehicle_s - FOLLOW_DISTANCE
+
+ to estimate s, the duration = N_SAMPLES * DT - subpath_size * PATH_DT = 20 * 0.2 - 25 * 0.02 = 4 - 0.5 = 3.5,
+ covering all the data points required to create to the car controller
+
+ the input parameter: car_just_ahead is determine by examining the other cars by the following logic:
+ on the same lane, and within close distance within FOLLOW_DISTANCE (8 meters).
+
+
+ #+NAME:car_jsut_ahead
+ #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+   bool car_to_left = false, car_to_right = false, car_just_ahead = false;
+   for (Vehicle other_car: other_cars) {
+     double s_diff = fabs(other_car.s - car_s);
+     if (s_diff < FOLLOW_DISTANCE) {
+       cout << "s diff: " << s_diff << endl;
+       double d_diff = other_car.d - car_d;
+       if (d_diff > 2 && d_diff < 6) {
+         car_to_right = true;
+       } else if (d_diff < -2 && d_diff > -6) {
+         car_to_left = true;
+       } else if (d_diff > -2 && d_diff < 2) {
+         car_just_ahead = true;
+       }
+     }
+    }
+ #+END_SRC
+
+ #+NAME:get_target_for_state
+ #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+   vector<vector<double>> Vehicle::get_target_for_state(string state, map<int, vector<vector<double>>> predictions, double duration, bool car_just_ahead) {
+     // Returns two lists s_target and d_target in a single vector - s_target includes
+     // [s, s_dot, and s_ddot] and d_target includes the same
+     // If no leading car found target lane, ego car will make up PERCENT_V_DIFF_TO_MAKE_UP of the difference
+     // between current velocity and target velocity. If leading car is found set target s to FOLLOW_DISTANCE
+     // and target s_dot to leading car's s_dot based on predictions
+     int target_lane, current_lane = this->d / 4;
+     double target_d;
+     // **** TARGETS ****
+     // lateral displacement : depends on state
+     // lateral velocity : 0
+     double target_d_d = 0;
+     // lateral acceleration : 0
+     double target_d_dd = 0;
+     // longitudinal velocity : current velocity + max allowed accel * duration
+     double target_s_d = min(this->s_d + MAX_INSTANTANEOUS_ACCEL/4 * duration, SPEED_LIMIT);
+     target_s_d = SPEED_LIMIT;
+     // longitudinal acceleration : zero ?
+     double target_s_dd = 0;
+     // longitudinal acceleration : difference between current/target velocity over trajectory duration?
+     //double target_s_dd = (target_s_d - this->s_d) / (N_SAMPLES * DT);
+     // longitudinal displacement : current displacement plus difference in current/target velocity times
+     // trajectory duration
+     double target_s = this->s + (this->s_d + target_s_d) / 2 * duration;
+
+     vector<double> leading_vehicle_s_and_sdot;
+
+     if(state.compare("KL") == 0)
+     {
+       target_d = (double)current_lane * 4 + 2;
+       target_lane = target_d / 4;
+     }
+     else if(state.compare("LCL") == 0)
+     {
+       target_d = ((double)current_lane - 1) * 4 + 2;
+       target_lane = target_d / 4;
+     }
+     else if(state.compare("LCR") == 0)
+     {
+       target_d = ((double)current_lane + 1) * 4 + 2;
+       target_lane = target_d / 4;
+     }
+
+     // replace target_s variables if there is a leading vehicle close enough
+     leading_vehicle_s_and_sdot = get_leading_vehicle_data_for_lane(target_lane, predictions, duration);
+     double leading_vehicle_s = leading_vehicle_s_and_sdot[0];
+     if (leading_vehicle_s - target_s < FOLLOW_DISTANCE && leading_vehicle_s > this->s) {
+
+       target_s_d = leading_vehicle_s_and_sdot[1];
+
+       if (fabs(leading_vehicle_s - target_s) < 0.5 * FOLLOW_DISTANCE) {
+         //cout << "TOO CLOSE IN LANE " << target_lane << "!! current target speed: " << target_s_d;
+         target_s_d -= 1; // slow down if too close
+         //cout << "  new target speed: " << target_s_d << endl;
+       }
+
+       target_s = leading_vehicle_s - FOLLOW_DISTANCE;
+       // target acceleration = difference between start/end velocities over time duration? or just zero?
+       //target_s_dd = (target_s_d - this->s_d) / (N_SAMPLES * DT);
+
+       // // DEBUG
+       // cout << "NEARBY LEAD VEHICLE DETECTED!  ";
+       // cout << "s: " << leading_vehicle_s_and_sdot[0]
+       //    << ", lane: " << target_lane
+       //    << ", speed: " << leading_vehicle_s_and_sdot[1] << endl;
+     }
+
+     // emergency brake
+     if (car_just_ahead) {
+       target_s_d = 0.0;
+     }
+
+     return {{target_s, target_s_d, target_s_dd}, {target_d, target_d_d, target_d_dd}};
+   }
+ #+END_SRC
+
+ In get_target_for_state, the information about the leading vehicle data for a lane is obtained from get_leading_vehicle_data_for_lane
+ with input of target_lane, predictions, and duration.
+
+ get_leading_vehicle_data_for_lane outputs: {nearest_leading_vehicle_distance, nearest_leading_vehicle_speed}
+ this is similar to my data_lanes' values.
+ It looks that it computes the velocities by differentiation rather than use the raw data collected.
+ This is different from my approach.
+ to compute by differentiation, it let prediction store trajectory
+
+ The time to compute the velocity is duration / N_SAMPLES, why it's not the UPDATE_INTERVAL? N_SAMPLES is 20.
+ It seems that the value definition of the time is arbitrary, dependent on the duration, it seems not quite logic.
+ It may takes understanding of the predictions to fully understand.
+
+ get_leading_vehicle_data_for_lane scans for the nearest in front of this->s
+
+ predictions is a list/array of prediction. prediction.second is vector<vector<double>> it's an array of vehicle observations.
+ Each observation has s position, and d, but not the v?
+
+ get_leading_vehicle_data_for_lane is defined in vehicle.cpp:
+
+ #+NAME:get_leading_vehicle_data_for_lane
+ #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    vector<double> Vehicle::get_leading_vehicle_data_for_lane(int target_lane, map<int, vector<vector<double>>> predictions, double duration) {
+     // returns s and s_dot for the nearest (ahead) vehicle in target lane
+     // this assumes the dummy vehicle will keep its lane and velocity, it will return the end position
+     // and velocity (based on difference between last two positions)
+     double nearest_leading_vehicle_speed = 0, nearest_leading_vehicle_distance = 99999;
+     for (auto prediction : predictions) {
+       vector<vector<double>> pred_traj = prediction.second;
+       int pred_lane = pred_traj[0][1] / 4;
+       if (pred_lane == target_lane) {
+         double start_s = pred_traj[0][0];
+         double predicted_end_s = pred_traj[pred_traj.size()-1][0];
+         double next_to_last_s = pred_traj[pred_traj.size()-2][0];
+         double dt = duration / N_SAMPLES;
+         double predicted_s_dot = (predicted_end_s - next_to_last_s) / dt;
+         if (predicted_end_s < nearest_leading_vehicle_distance && start_s > this->s) {
+           nearest_leading_vehicle_distance = predicted_end_s;
+           nearest_leading_vehicle_speed = predicted_s_dot;
+         }
+       }
+     }
+     return {nearest_leading_vehicle_distance, nearest_leading_vehicle_speed};
+   }
+ #+END_SRC
+
+
+*** determine-best-trajectory
+
+    Essentially produce the decision of the next lane, and the desired speed in best_target.
+
+    The first top comment is about abandoned approach.
+
+    I wish that there is an annotation system associated with the source code.
+
+    my_car.update_available_states: put feasible states to consider in the object my_car
+
+    the author has good practice of putting extensive print out for new functionality
+
+    start to compute best_frenet, best_target:
+    with the computed available states above, let get_target_for_states with input of predictions, duration, and car_just_ahead.
+    (predictions is the next major data to be studied.), the outcome is in terms of array of arrays, one array for s, one array for
+    d (lane), each array has 3 elements, s, s_d, s_dd | d, d_d, d_dd
+    essentially compute the decisions in my design.
+    target_s_add_d = my_car.get_target_for_state is one of the key that I should study further,
+    mainly for the computation for s_d (velocity).
+
+    It then computes the trajectory based on computed s, and d data.
+    This is different from mine. The trajectory is used to compute the cost.
+
+    Then, it computes the cost for the state with the computed trajectory.
+
+    Finally, it select the state by the lowest cost.
+    The resulted best_target is used in the subsequent path generation.
+    (target_lane from best_target[1][0], target_s_dot is from best_target[0][1] for velecity spaced s points.
+
+    It seems that the best_frenet_traj is no longer used.
+
+   The following code displays the content of best_frenet_traj and predictions:
+   #+NAME:display_best_frenet_traj
+   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+     single_iteration_log << "i,ego s,ego d,s1,d1,s2,d2,s3,d3,s4,d4,s5,d5,s6,d6,s7,d7,s8,d8,s9,d9,s10,d10,s11,d11,s12,d12" << endl;
+     for (int i = 0; i < best_frenet_traj[0].size(); i++) {
+       single_iteration_log << i << ",";
+       single_iteration_log << best_frenet_traj[0][i] << "," << best_frenet_traj[1][i] << ",";
+       for (auto prediction : predictions) {
+         vector<vector<double>> pred_traj = prediction.second;
+         single_iteration_log << pred_traj[i][0] << "," << pred_traj[i][1] << ",";
+       }
+       single_iteration_log << endl;
+      }
+   #+END_SRC
+
+   From the above code, one can deduct that best_frenet_traj contains 12 pair of s, and d value: best_frenet_traj[0] is for s,
+   while best_frenet_traj[1] for d
+
+   On the other hand, prediction.second (pred_traj) contains 12x2 entries, pred_traj[i][0] for s, and pred_traj[i][1] for d
+    #+NAME:determine-best-trajectory
+    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      // ******************************* DETERMINE BEST TRAJECTORY ***********************************
+      // where the magic happens? NOPE! I WISH - THIS APPORACH HAS BEEN ABANDONED
+      // trajectories come back in a list of s values and a list of d values (not zipped together)
+      // duration for trajectory is variable, depending on number of previous points used
+      // vector<vector<double>> frenet_traj = my_car.get_best_frenet_trajectory(predictions, duration);
+      // vector<double> traj_xy_point, best_x_traj, best_y_traj, interpolated_x_traj, interpolated_y_traj;
+
+      // // DEBUG
+      // cout << "frenet traj: " << endl;
+      // for (int i = 0; i < frenet_traj[0].size(); i++) {
+      // 	cout << frenet_traj[0][i] << ", " << frenet_traj[1][i] << endl;
+      // }
+      // cout << endl << endl;
+
+      my_car.update_available_states(car_to_left, car_to_right);
+
+      // // DEBUG
+      // cout << "available states: ";
+      // for (auto st: my_car.available_states) cout << st << " ";
+      // cout << endl;
+
+      vector<vector<double>> best_frenet_traj, best_target;
+      double best_cost = 999999;
+      string best_traj_state = "";
+      for (string state: my_car.available_states) {
+        vector<vector<double>> target_s_and_d = my_car.get_target_for_state(state, predictions, duration, car_just_ahead);
+
+        // // DEBUG
+        // cout << "target s&d for state " << state << ": ";
+        // for (int i = 0; i < 2; i++) {
+        // 	for (int j = 0; j < 3; j++) {
+        //     cout << target_s_and_d[i][j];
+        //     if (j != 2) cout << ", ";
+        // 	}
+        // 	cout << "; ";
+        // }
+        // cout << endl;
+
+        vector<vector<double>> possible_traj = my_car.generate_traj_for_target(target_s_and_d, duration);
+
+        double current_cost = calculate_total_cost(possible_traj[0], possible_traj[1], predictions);
+
+        // // DEBUG
+        // cout << "total cost: " << current_cost << endl;
+
+        if (current_cost < best_cost) {
+          best_cost = current_cost;
+          best_frenet_traj = possible_traj;
+          best_traj_state = state;
+          best_target = target_s_and_d;
+        }
+       }
+
+      // // DEBUG - ONLY KEEP LANE - REMOVE THIS LATER :D
+      // best_traj_state = "KL";
+      // best_target = my_car.get_target_for_state(best_traj_state, predictions, duration);
+      // // but keep this, maybe
+      // best_frenet_traj = my_car.generate_traj_for_target(best_target, duration);
+
+      // // DEBUG
+      // cout << "chosen state: " << best_traj_state << ", cost: " << best_cost << endl;
+      // cout << "target (s,sd,sdd - d,dd,ddd): (";
+      // for (int i = 0; i < 2; i++) {
+      // 		for (int j = 0; j < 3; j++) {
+      // 				cout << best_target[i][j];
+      // 				if (j != 2) cout << ", ";
+      // 		}
+      // 		cout << "; ";
+      // }
+      // cout << ")" << endl;
+
+      // LOG
+      single_iteration_log << "i,ego s,ego d,s1,d1,s2,d2,s3,d3,s4,d4,s5,d5,s6,d6,s7,d7,s8,d8,s9,d9,s10,d10,s11,d11,s12,d12" << endl;
+      for (int i = 0; i < best_frenet_traj[0].size(); i++) {
+        single_iteration_log << i << ",";
+        single_iteration_log << best_frenet_traj[0][i] << "," << best_frenet_traj[1][i] << ",";
+        for (auto prediction : predictions) {
+          vector<vector<double>> pred_traj = prediction.second;
+          single_iteration_log << pred_traj[i][0] << "," << pred_traj[i][1] << ",";
+        }
+        single_iteration_log << endl;
+       }
+ #+END_SRC
+
+
+**** calculate_total_cost
+
+     This is an umbrella function, the concrete logic is in the individual cost functions.
+     #+NAME:calculate_total_cost
+     #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+       double calculate_total_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+
+         double total_cost = 0;
+         double col = collision_cost(s_traj, d_traj, predictions) * COLLISION_COST_WEIGHT;
+         double buf = buffer_cost(s_traj, d_traj, predictions) * BUFFER_COST_WEIGHT;
+         double ilb = in_lane_buffer_cost(s_traj, d_traj, predictions) * IN_LANE_BUFFER_COST_WEIGHT;
+         double eff = efficiency_cost(s_traj) * EFFICIENCY_COST_WEIGHT;
+         double nml = not_middle_lane_cost(d_traj) * NOT_MIDDLE_LANE_COST_WEIGHT;
+         //double esl = exceeds_speed_limit_cost(s_traj) * SPEED_LIMIT_COST_WEIGHT;
+         //double mas = max_accel_cost(s_traj) * MAX_ACCEL_COST_WEIGHT;
+         //double aas = avg_accel_cost(s_traj) * AVG_ACCEL_COST_WEIGHT;
+         //double mad = max_accel_cost(d_traj) * MAX_ACCEL_COST_WEIGHT;
+         //double aad = avg_accel_cost(d_traj) * AVG_ACCEL_COST_WEIGHT;
+         //double mjs = max_jerk_cost(s_traj) * MAX_JERK_COST_WEIGHT;
+         //double ajs = avg_jerk_cost(s_traj) * AVG_JERK_COST_WEIGHT;
+         //double mjd = max_jerk_cost(d_traj) * MAX_JERK_COST_WEIGHT;
+         //double ajd = avg_jerk_cost(d_traj) * AVG_JERK_COST_WEIGHT;
+         //double tdiff = time_diff_cost(target_time, actual_time) * TIME_DIFF_COST_WEIGHT;
+         //double strajd = traj_diff_cost(s_traj, target_s) * TRAJ_DIFF_COST_WEIGHT;
+         //double dtrajd = traj_diff_cost(d_traj, target_d) * TRAJ_DIFF_COST_WEIGHT;
+
+         total_cost += col + buf + ilb + eff + nml;// + esl + mas + aas + mad + aad + mjs + ajs + mjd + ajd;
+
+         // // DEBUG
+         // cout << "costs - col: " << col << ", buf: " << buf << ", ilb: " << ilb << ", eff: " << eff << ", nml: " << nml;
+         // //cout << ", " << esl
+         // //cout << ", " << mas << ", " << aas << ", " << mad << ", " << aad;
+         // //cout << ", " << mjs << ", " << ajs << ", " << mjd << ", " << ajd;
+         // cout << "  ** ";
+         // //cout << endl;
+         // //cout << "total cost: " << total_cost << endl;
+
+         return total_cost;
+       }
+     #+END_SRC
+
+***** collision_cost
+      Very straight forward relying on nearest_approach_to_any_vehicle, if it's too close, then return 1 else 0.
+      #define VEHICLE_RADIUS 1.25              // meters
+
+      #+NAME:collision_cost
+      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+        double collision_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+          // Binary cost function which penalizes collisions.
+          double nearest = nearest_approach_to_any_vehicle(s_traj, d_traj, predictions);
+          if (nearest < 2 * VEHICLE_RADIUS) {
+            return 1;
+          } else {
+            return 0;
+          }
+        }
+      #+END_SRC
+
+****** nearest_approach_to_any_vehicle
+
+       Based nearest_approach, find the nearest distance to a car no the road.
+#+NAME:nearest_approach_to_any_vehicle
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double nearest_approach_to_any_vehicle(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+    // Determines the nearest the vehicle comes to any other vehicle throughout a trajectory
+    double closest = 999999;
+    for (auto prediction : predictions) {
+      double current_dist = nearest_approach(s_traj, d_traj, prediction.second);
+      if (current_dist < closest) {
+        closest = current_dist;
+      }
+    }
+    return closest;
+  }
+#+END_SRC
+
+******* nearest_approach
+
+        scan the distance between Ego and the other cars, regardless of lanes, find the closest, report it.
+        It uses a simulation approach, pre-calculate the trajactory of Ego, and the other cars.
+        While I'm using a more computation approach.
+
+#+NAME:nearest_approach
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double nearest_approach(vector<double> s_traj, vector<double> d_traj, vector<vector<double>> prediction) {
+    double closest = 999999;
+    for (int i = 0; i < N_SAMPLES; i++) {
+      double current_dist = sqrt(pow(s_traj[i] - prediction[i][0], 2) + pow(d_traj[i] - prediction[i][1], 2));
+      if (current_dist < closest) {
+        closest = current_dist;
+      }
+    }
+    return closest;
+  }
+#+END_SRC
+
+***** buffer_cost
+      The cost of being close over the trajectory of Ego and the other cars.
+      This may have some overlapping with collision cost, but they have very different coefficients.
+
+#+NAME:buffer_cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double logistic(double x){
+    // A function that returns a value between 0 and 1 for x in the range[0, infinity] and - 1 to 1 for x in
+    // the range[-infinity, infinity]. Useful for cost functions.
+    return 2.0 / (1 + exp(-x)) - 1.0;
+  }
+  double buffer_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+    // Penalizes getting close to other vehicles.
+    double nearest = nearest_approach_to_any_vehicle(s_traj, d_traj, predictions);
+    return logistic(2 * VEHICLE_RADIUS / nearest);
+  }
+#+END_SRC
+
+***** in_lane_buffer_cost
+
+      #+NAME:in_lane_buffer_cost
+      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+        double in_lane_buffer_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+          // Penalizes getting close to other vehicles.
+          double nearest = nearest_approach_to_any_vehicle_in_lane(s_traj, d_traj, predictions);
+          return logistic(2 * VEHICLE_RADIUS / nearest);
+        }
+      #+END_SRC
+
+****** nearest_approach_to_any_vehicle_in_lane
+       Only consider the distance being in the same lane, the rest of the logic of closest approach is the same as that of the other.
+#+NAME:nearest_approach_to_any_vehicle_in_lane
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double nearest_approach_to_any_vehicle_in_lane(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
+    // Determines the nearest the vehicle comes to any other vehicle throughout a trajectory
+    double closest = 999999;
+    for (auto prediction : predictions) {
+      double my_final_d = d_traj[d_traj.size() - 1];
+      int my_lane = my_final_d / 4;
+      vector<vector<double>> pred_traj = prediction.second;
+      double pred_final_d = pred_traj[pred_traj.size() - 1][1];
+      int pred_lane = pred_final_d / 4;
+      if (my_lane == pred_lane) {
+        double current_dist = nearest_approach(s_traj, d_traj, prediction.second);
+        if (current_dist < closest && current_dist < 120) {
+          closest = current_dist;
+        }
+      }
+    }
+    return closest;
+  }
+#+END_SRC
+
+***** efficiency_cost
+Rewards high average speeds.
+
+#+NAME:efficiency_cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  double efficiency_cost(vector<double> s_traj) {
+    // Rewards high average speeds.
+    vector<double> s_dot_traj = velocities_for_trajectory(s_traj);
+    double final_s_dot, total = 0;
+
+    // cout << "DEBUG - s_dot: ";
+    // for (double s_dot: s_dot_traj) {
+    //   cout << s_dot << ", ";
+    //   total += s_dot;
+    // }
+    // cout << "/DEBUG" << endl;
+    // double avg_vel = total / s_dot_traj.size();
+
+    final_s_dot = s_dot_traj[s_dot_traj.size() - 1];
+    // cout << "DEBUG - final s_dot: " << final_s_dot << endl;
+    return logistic((SPEED_LIMIT - final_s_dot) / SPEED_LIMIT);
+  }
+#+END_SRC
+
+****** not_middle_lane_cost
+penalize not shooting for middle lane (d = 6)
+
+#+NAME:not_middle_lane_cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+double not_middle_lane_cost(vector<double> d_traj) {
+  // penalize not shooting for middle lane (d = 6)
+  double end_d = d_traj[d_traj.size()-1];
+  return logistic(pow(end_d-6, 2));
+}
+#+END_SRC
+
+*** TODO generate-predictions-from-sensor-fusion-data
+
+    My expectation to this part is the production of predictions of the other vehicles
+    (rather than predictions, it actually just compile the s, and d for the other vehicles.)
+    It seems it's just some processing of fusion_data into predictions, not very interesting, compared with my approach.
+
+    Here duration is first defined as
+    double duration = N_SAMPLES * DT - subpath_size * PATH_DT;
+
+    vector<Vehicle> other_cars; // to hold the sensor_fusion data, in terms of Vehicle object
+
+    here predictions are defined:
+    map<int, vector<vector<double>>> predictions; // map from car's id to prediction
+
+    Next iterate through sensor_fusion, the input from simulator.
+    It did calculate the velocity from vx, and vy, but I wonder why it didn't use it subsequently.
+    It then construct Vehicle object:
+    s: from sensor
+    s_d: computed from vx, vy, which are from sensor
+    s_dd: assume to be 0
+    d: from sensor
+    d_d: 0
+    d_dd: 0
+    Vehicle(sf[5], other_car_vel, 0, sf[6], 0, 0);
+#+NAME:Vehicle-construct
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+Vehicle::Vehicle(double s, double s_d, double s_dd, double d, double d_d, double d_dd) {
+
+  this->s    = s;         // s position
+  this->s_d  = s_d;       // s dot - velocity in s
+  this->s_dd = s_dd;      // s dot-dot - acceleration in s
+  this->d    = d;         // d position
+  this->d_d  = d_d;       // d dot - velocity in d
+  this->d_dd = d_dd;      // d dot-dot - acceleration in d
+  state = "CS";
+
+}
+#+END_SRC
+
+The prediction is computed by other_car.generate_predictions(traj_start_time, duration)
+
+double traj_start_time = subpath_size * PATH_DT; // the whole time span of the remaining data points to be reused.
+That is the start time of new planning for car Ego, so the predictions for the other cars should also start from it.
+
+The following comment is very helpful:
+// Generates a rlist of predicted s and d positions for dummy constant-speed vehicles
+  // Because ego car trajectory is considered from end of previous path, we should also consider the
+  // trajectories of other cars starting at that time.
+
+Here is further annotation for generate_predictions:
+
+Note: the other cars are assumed of constant speed, then all the location value s,
+is just a function of time, and the constant speed.
+
+This function just pre-calculate the position s, and d at the each interval of interests.
+
+The intervals are i + duration/N_SAMPLES, each interval length is duration/N_SAMPLES
+
+predictions: vector<vector<double>> predictions // N_SAMPLES x 2, predictions[i] prediction for the i-th interval
+predictions[i][0] for s = start_s + constant_speed * time_to_the_intervals
+predictions[i][1] lane number.
+
+#+NAME:generate_predictions
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  vector<vector<double>> Vehicle::generate_predictions(double traj_start_time, double duration) {
+
+    // Generates a list of predicted s and d positions for dummy constant-speed vehicles
+    // Because ego car trajectory is considered from end of previous path, we should also consider the
+    // trajectories of other cars starting at that time.
+
+    vector<vector<double>> predictions;
+    for( int i = 0; i < N_SAMPLES; i++)
+    {
+      double t = traj_start_time + (i * duration/N_SAMPLES);
+      double new_s = this->s + this->s_d * t;
+      vector<double> s_and_d = {new_s, this->d};
+      predictions.push_back(s_and_d);
+    }
+    return predictions;
+  }
+#+END_SRC
+
+Understanding of N_SAMPLES:
+based on the following expression:
+double t = traj_start_time + (i * duration/N_SAMPLES);
+N_SAMPLES is the time steps to predict the movement of the other cars, starting from traj_start_time.
+#define N_SAMPLES 20
+#define DT 0.20  // seconds
+
+duration:
+double duration = N_SAMPLES * DT - subpath_size * PATH_DT; (20 * 0.2 - 25 * 0.02 = 4 - 0.5 = 3.5 seconds)
+
+DT: DT only appears in duration = N_SAMPLES * DT - subpath_size * PATH_DT, thus it's hard to understand. If DT = PATH_DT, then, it becomes much easier to understand the duration.
+then duration would be the time period from the end of subpath, till the end of the predictions of N_SAMPLES. By this understanding, traj_start_time should be end of the subpath time.
+Yes, traj_start_time is that:
+
+traj_start_time:
+double traj_start_time = subpath_size * PATH_DT;
+
+Let's do an experiment of changing DT to PATH_DT, to see if it still works.
+
+Qusetion: are all the car's data required. My approach are just collecting the nearest.
+It seems to me that it has no material difference.
+
+Overall structure of predictions: a map from vehicle id to N_SAMPLES x 2,
+predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 0 to N_SAMPLES - 1
+
+#+NAME:generate-predictions-from-sensor-fusion-data
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // ********************* GENERATE PREDICTIONS FROM SENSOR FUSION DATA **************************
+  // The data format for each car is: [ id, x, y, vx, vy, s, d]. The id is a unique identifier for that car. The x, y values are in global map coordinates, and the vx, vy values are the velocity components, also in reference to the global map. Finally s and d are the Frenet coordinates for that car.
+  double duration = N_SAMPLES * DT - subpath_size * PATH_DT;
+  vector<Vehicle> other_cars;
+  map<int, vector<vector<double>>> predictions;
+  for (auto sf: sensor_fusion) {
+    double other_car_vel = sqrt(pow((double)sf[3], 2) + pow((double)sf[4], 2));
+    Vehicle other_car = Vehicle(sf[5], other_car_vel, 0, sf[6], 0, 0);
+    other_cars.push_back(other_car);
+    int v_id = sf[0];
+    vector<vector<double>> preds = other_car.generate_predictions(traj_start_time, duration);
+    predictions[v_id] = preds;
+   }
+
+  // // DEBUG
+  // cout << "****SENSOR FUSION DATA****" << endl;
+  // cout << "sensor fusion: (id, x, y, vx, vy, s, d), (distance from ego)" << endl;
+  // for (auto sf: sensor_fusion) {
+  // 	cout << "(" << sf[0] << ": " << sf[1] << "," << sf[2] << "," << sf[3] << "," << sf[4] << "," << sf[5] << "," << sf[6] << ") (" << distance(pos_x, pos_y, sf[1], sf[2]) << ")" << endl;
+  // }
+  // cout << endl << "predictions: (id, (i s1,d1) (i s2,d2) ... (i sn,dn) - spaced out)" << endl;
+  // for (auto pred : predictions) {
+  // 	cout << pred.first << " ";
+  // 	auto sd = pred.second;
+  // 	for (int i = 0; i < N_SAMPLES; i += N_SAMPLES/3-1) {
+  // 		cout << "(" << i << " " << sd[i][0] << "," << sd[i][1] << ") ";
+  // 	}
+  // 	cout << endl;
+  // }
+  // cout << endl;
+
+  // Add a little ADAS-like warning system - if any other car is immediately to left or right, set a
+  // flag to be used for hard limiting available states (i.e. if there is a car to the left, prevent
+  // Lane Change Left as an available state)
+  bool car_to_left = false, car_to_right = false, car_just_ahead = false;
+  for (Vehicle other_car: other_cars) {
+    double s_diff = fabs(other_car.s - car_s);
+    if (s_diff < FOLLOW_DISTANCE) {
+      cout << "s diff: " << s_diff << endl;
+      double d_diff = other_car.d - car_d;
+      if (d_diff > 2 && d_diff < 6) {
+        car_to_right = true;
+      } else if (d_diff < -2 && d_diff > -6) {
+        car_to_left = true;
+      } else if (d_diff > -2 && d_diff < 2) {
+        car_just_ahead = true;
+      }
+    }
+   }
+
+  // DEBUG
+  if (car_to_right) cout << "CAR ON THE RIGHT!!!" << endl;
+  if (car_to_left) cout << "CAR ON THE LEFT!!!" << endl;
+  if (car_just_ahead) cout << "CAR JUST AHEAD!!!" << endl;
+
+
+#+END_SRC
+
+*** determine-ego-car-parameters-construct-vehicle-object
+
+    My expectation to this part may be just extracting data from simulator and populate into object of Vehicle for Ego.
+    It will compute: Vehicle class requires s,s_d,s_dd,d,d_d,d_dd, for Ego
+
+    It seems that the final output of this segment is in my_car, which is a main scope object of Vehicle.
+    - my_car is used to derive possible states, but it's interesting to see what's been used, s, d, s_d, may be used.
+    - also used for get_target_for_state, essentially, the evaluation of the state in terms of target velocity and target lane.
+    - used with generate_traj_for_target
+
+    note: first define
+    int subpath_size = min(PREVIOUS_PATH_POINTS_TO_KEEP, (int)previous_path_x.size()); // just part of the previous_path
+    PREVIOUS_PATH_POINTS_TO_KEEP is 25, while prevous_path_x_size is usually about 48 or 47
+    double traj_start_time = subpath_size * PATH_DT; // the time at the last point of the subpath
+
+    There are two cases:
+    1. At the first, when there is no prevous_path yet, just starting, use the data from simulator (controller).
+    2. When there is prevous_path, use prevous_path and input from simulator, reconciled together.
+
+
+**** Initial case
+
+     As much as possible use the input from the simulator:
+       pos_x = car_x;
+       pos_y = car_y;
+       angle = deg2rad(car_yaw);
+       pos_s = car_s;
+       pos_d = car_d;
+       s_dot = car_speed; // already converted to meter/second when read from simulator
+       d_dot = 0;
+       s_ddot = 0;
+       d_ddot = 0;
+
+**** Non-initial case
+
+     Take the adopted portion of the previous_path's end, assumed that to be the current position of Ego!
+
+       // consider current position to be last point of previous path to be kept
+       // This effectively ignoring the real data of car_x, car_y, car_s, and car_d, why? and what is the consequence?
+       pos_x = previous_path_x[subpath_size-1];
+       pos_y = previous_path_y[subpath_size-1];
+
+       pos_x2 = previous_path_x[subpath_size-2];
+       pos_y2 = previous_path_y[subpath_size-2];
+
+       angle = atan2(pos_y-pos_y2,pos_x-pos_x2);
+
+       vector<double> frenet = getFrenet(pos_x, pos_y, angle, interpolated_waypoints_x, interpolated_waypoints_y, interpolated_waypoints_s);
+       //vector<double> frenet = getFrenet(pos_x, pos_y, angle, map_waypoints_x, map_waypoints_y, map_waypoints_s);
+       pos_s = frenet[0];
+       pos_d = frenet[1];
+
+       The following seems discussing about dx, dy, why do we care for dx, dy?
+       It's for the purpose of computing s_dot, d_dot, s_ddot, d_ddot
+
+       // determine dx, dy vector from set of interpoated waypoints, with pos_x, pos_y as reference point;
+       // since interpolated waypoints are ~1m apart and path points tend to be <0.5m apart, these
+       // values can be reused for previous two points (and using the previous waypoint data may be
+       // more accurate) to calculate vel_s (s_dot), vel_d (d_dot), acc_s (s_ddot), and acc_d (d_ddot)
+
+       int next_interp_waypoint_index = NextWaypoint(pos_x, pos_y, angle, interpolated_waypoints_x, interpolated_waypoints_y);
+       double dx = interpolated_waypoints_dx[next_interp_waypoint_index - 1];
+       double dy = interpolated_waypoints_dy[next_interp_waypoint_index - 1];
+       // sx, sy vector is perpendicular to dx, dy (why one can compute the perpendicular vector as follows, and why bother sx, sy?
+       // sx, sy, and dx, dy are used to compute s_dot, and d_dot from vel_x1, vel_y1
+       double sx = -dy;
+       double sy = dx;
+
+       // calculate s_dot & d_dot
+       vel_x1 = (pos_x - pos_x2) / PATH_DT;
+       vel_y1 = (pos_y - pos_y2) / PATH_DT;
+       // want projection of xy velocity vector (V) onto S (sx,sy) and D (dx,dy) vectors, and since S
+       // and D are unit vectors this is simply the dot products of V with S and V with D
+       s_dot = vel_x1 * sx + vel_y1 * sy; (how is s_dot relate to car_speed?, in the case of reading from simulator, yes, it's so)
+       d_dot = vel_x1 * dx + vel_y1 * dy;
+
+       // have to get another point to calculate s_ddot, d_ddot from xy acceleration
+       pos_x3 = previous_path_x[subpath_size-3];
+       pos_y3 = previous_path_y[subpath_size-3];
+       vel_x2 = (pos_x2 - pos_x3) / PATH_DT;
+       vel_y2 = (pos_y2 - pos_y3) / PATH_DT;
+       acc_x = (vel_x1 - vel_x2) / PATH_DT;
+       acc_y = (vel_y1 - vel_y2) / PATH_DT;
+       s_ddot = acc_x * sx + acc_y * sy; // likewise project to sx, sy
+       d_ddot = acc_x * dx + acc_y * dy; // project to dx, dy
+
+      interpolated_waypoints_dx, and interpolated_waypoints_dy are calculated in the segments of interpolate-points
+       Some more computations: (It seems to me that the following are not really used.)
+       not used
+       pos_s2
+       pos_d2
+       s_dot2
+       d_dot2
+       s_ddot2
+       d_ddot2
+
+       Comment out the following computations:
+       double eval_time, pos_s2, pos_d2, s_dot2, d_dot2, s_ddot2, d_ddot2;
+       // another group of s, d, s_dot, d_dot, s_ddot, d_ddot, what's the purpose?
+
+       vector<double> s_dot_coeffs  = my_car.differentiate_coeffs(my_car.s_traj_coeffs);
+       vector<double> d_dot_coeffs  = my_car.differentiate_coeffs(my_car.d_traj_coeffs);
+       vector<double> s_ddot_coeffs = my_car.differentiate_coeffs(s_dot_coeffs);
+       vector<double> d_ddot_coeffs = my_car.differentiate_coeffs(d_dot_coeffs);
+       eval_time = (NUM_PATH_POINTS - subpath_size) * PATH_DT;
+       pos_s2  = my_car.evaluate_coeffs_at_time(my_car.s_traj_coeffs, eval_time);
+       pos_d2  = my_car.evaluate_coeffs_at_time(my_car.d_traj_coeffs, eval_time);
+       s_dot2  = my_car.evaluate_coeffs_at_time(s_dot_coeffs, eval_time);
+       d_dot2  = my_car.evaluate_coeffs_at_time(d_dot_coeffs, eval_time);
+       s_ddot2 = my_car.evaluate_coeffs_at_time(s_ddot_coeffs, eval_time);
+       d_ddot2 = my_car.evaluate_coeffs_at_time(d_ddot_coeffs, eval_time);
+
+      Finally assemble the data into my_car:
+      my_car.s    = pos_s;           // s position
+      my_car.s_d  = s_dot;           // s dot - velocity in s
+      my_car.s_dd = s_ddot;          // s dot-dot - acceleration in s
+      my_car.d    = pos_d;           // d position
+      my_car.d_d  = d_dot;           // d dot - velocity in d
+      my_car.d_dd = d_ddot;          // d dot-dot - acceleration in d
+
+      It's interesting to see what are they used.
+ #+NAME:determine-ego-car-parameters-construct-vehicle-object
+ #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // **************** DETERMINE EGO CAR PARAMETERS AND CONSTRUCT VEHICLE OBJECT ******************
+  // Vehicle class requires s,s_d,s_dd,d,d_d,d_dd - in that order
+  double pos_s, s_dot, s_ddot;
+  double pos_d, d_dot, d_ddot;
+  // Other values necessary for determining these based on future points in previous path
+  double pos_x, pos_y, pos_x2, pos_y2, angle, vel_x1, vel_y1,
+    pos_x3, pos_y3, vel_x2, vel_y2, acc_x, acc_y;
+
+  int subpath_size = min(PREVIOUS_PATH_POINTS_TO_KEEP, (int)previous_path_x.size());
+  double traj_start_time = subpath_size * PATH_DT;
+
+  // use default values if not enough previous path points
+  if (subpath_size < 4) {
+    pos_x = car_x;
+    pos_y = car_y;
+    angle = deg2rad(car_yaw);
+    pos_s = car_s;
+    pos_d = car_d;
+    s_dot = car_speed;
+    d_dot = 0;
+    s_ddot = 0;
+    d_ddot = 0;
+   } else {
+    // consider current position to be last point of previous path to be kept
+    pos_x = previous_path_x[subpath_size-1];
+    pos_y = previous_path_y[subpath_size-1];
+    pos_x2 = previous_path_x[subpath_size-2];
+    pos_y2 = previous_path_y[subpath_size-2];
+    angle = atan2(pos_y-pos_y2,pos_x-pos_x2);
+    vector<double> frenet = getFrenet(pos_x, pos_y, angle, interpolated_waypoints_x, interpolated_waypoints_y, interpolated_waypoints_s);
+    //vector<double> frenet = getFrenet(pos_x, pos_y, angle, map_waypoints_x, map_waypoints_y, map_waypoints_s);
+    pos_s = frenet[0];
+    pos_d = frenet[1];
+
+    // determine dx, dy vector from set of interpoated waypoints, with pos_x,pos_y as reference point;
+    // since interpolated waypoints are ~1m apart and path points tend to be <0.5m apart, these
+    // values can be reused for previous two points (and using the previous waypoint data may be
+    // more accurate) to calculate vel_s (s_dot), vel_d (d_dot), acc_s (s_ddot), and acc_d (d_ddot)
+    int next_interp_waypoint_index = NextWaypoint(pos_x, pos_y, angle, interpolated_waypoints_x,
+                                                  interpolated_waypoints_y);
+    double dx = interpolated_waypoints_dx[next_interp_waypoint_index - 1];
+    double dy = interpolated_waypoints_dy[next_interp_waypoint_index - 1];
+    // sx,sy vector is perpendicular to dx,dy
+    double sx = -dy;
+    double sy = dx;
+
+    // calculate s_dot & d_dot
+    vel_x1 = (pos_x - pos_x2) / PATH_DT;
+    vel_y1 = (pos_y - pos_y2) / PATH_DT;
+    // want projection of xy velocity vector (V) onto S (sx,sy) and D (dx,dy) vectors, and since S
+    // and D are unit vectors this is simply the dot products of V with S and V with D
+    s_dot = vel_x1 * sx + vel_y1 * sy;
+    d_dot = vel_x1 * dx + vel_y1 * dy;
+
+    // have to get another point to calculate s_ddot, d_ddot from xy acceleration
+    pos_x3 = previous_path_x[subpath_size-3];
+    pos_y3 = previous_path_y[subpath_size-3];
+    vel_x2 = (pos_x2 - pos_x3) / PATH_DT;
+    vel_y2 = (pos_y2 - pos_y3) / PATH_DT;
+    acc_x = (vel_x1 - vel_x2) / PATH_DT;
+    acc_y = (vel_y1 - vel_y2) / PATH_DT;
+    s_ddot = acc_x * sx + acc_y * sy;
+    d_ddot = acc_x * dx + acc_y * dy;
+
+    // // DEBUG
+    // cout << "****CALCULATION OF INTERMEDIATE POINTS FOR STATE VECTOR****" << endl;
+    // cout << "pos_x 1 thru 3: " << pos_x << ", " << pos_x2 << ", " << pos_x3 << endl;
+    // cout << "pos_y 1 thru 3: " << pos_y << ", " << pos_y2 << ", " << pos_y3 << endl;
+    // cout << "angle: " << angle << endl;
+    // cout << "vel_x 1 thru 2: " << vel_x1 << ", " << vel_x2 << endl;
+    // cout << "vel_y 1 thru 2: " << vel_y1 << ", " << vel_y2 << endl;
+    // cout << "acc_x: " << acc_x << endl;
+    // cout << "acc_y: " << acc_y << endl;
+    // cout << "****FRENET PARAMETERS (from dx,dy vector)****" << endl;
+    // cout << "s_dot: " << s_dot << endl;
+    // cout << "d_dot: " << d_dot << endl;
+    // cout << "s_ddot: " << s_ddot << endl;
+    // cout << "d_ddot: " << d_ddot << endl;
+    // cout << endl << endl;
+    // try, instead, differentiating trajectory coefficients
+    // double eval_time, pos_s2, pos_d2, s_dot2, d_dot2, s_ddot2, d_ddot2;
+    // vector<double> s_dot_coeffs = my_car.differentiate_coeffs(my_car.s_traj_coeffs);
+    // vector<double> d_dot_coeffs = my_car.differentiate_coeffs(my_car.d_traj_coeffs);
+    // vector<double> s_ddot_coeffs = my_car.differentiate_coeffs(s_dot_coeffs);
+    // vector<double> d_ddot_coeffs = my_car.differentiate_coeffs(d_dot_coeffs);
+    // eval_time = (NUM_PATH_POINTS - subpath_size) * PATH_DT;
+    // pos_s2 = my_car.evaluate_coeffs_at_time(my_car.s_traj_coeffs, eval_time);
+    // pos_d2 = my_car.evaluate_coeffs_at_time(my_car.d_traj_coeffs, eval_time);
+    // s_dot2 = my_car.evaluate_coeffs_at_time(s_dot_coeffs, eval_time);
+    // d_dot2 = my_car.evaluate_coeffs_at_time(d_dot_coeffs, eval_time);
+    // s_ddot2 = my_car.evaluate_coeffs_at_time(s_ddot_coeffs, eval_time);
+    // d_ddot2 = my_car.evaluate_coeffs_at_time(d_ddot_coeffs, eval_time);
+
+    // s_dot = s_dot2;
+    // d_dot = d_dot2;
+    // d_ddot = d_ddot2;
+    // s_ddot = s_ddot2;
+
+    // // DEBUG
+    // cout << "****ALTERNATE METHOD: DIFFERENTIATE/EVALUATE POLYNOMIALS****" << endl;
+    // cout << "state (s,s_d,s_dd),(d,d_d,d_dd): (" << pos_s2 << ", " << s_dot2 << ", " << s_ddot2;
+    // cout << ") (" << pos_d2 << ", " << d_dot2 << ", " << d_ddot2 << ")" << endl << endl;
+   }
+
+  my_car.s    = pos_s;           // s position
+  my_car.s_d  = s_dot;           // s dot - velocity in s
+  my_car.s_dd = s_ddot;          // s dot-dot - acceleration in s
+  my_car.d    = pos_d;           // d position
+  my_car.d_d  = d_dot;           // d dot - velocity in d
+  my_car.d_dd = d_ddot;          // d dot-dot - acceleration in d
+
+  // // DEBUG
+  // cout << "****EGO CAR DATA****" << endl;
+  // cout << "ego state (x,y,s,d,yaw,speed): " << car_x << ", " << car_y << ", " << car_s << ", " << car_d << ", " << car_yaw << ", " << car_speed << endl;
+  // cout << "end_path_s/d: " << end_path_s << ", " << end_path_d << endl;
+  // cout << "planning state (x,y,yaw): " << pos_x << ", " << pos_y << ", " << angle << endl;
+  // cout << "planning state (s,s_d,s_dd),(d,d_d,d_dd): (" << pos_s << ", " << s_dot << ", " << s_ddot;
+  // cout << ") (" << pos_d << ", " << d_dot << ", " << d_ddot << ")" << endl << endl;
+#+END_SRC
+
+*** interpolate-points
+
+    My expectation is to interpolated data structures, and to see what are the content, and processing logic.
+    This code segment's main dependency is coarse_waypoints_{s, x, y, dx, dy} data, and the routine interpolate_points
+
+    interpolated parameters:
+
+    double dist_inc = 0.5; // interpolated parameters, 0.5 meters
+    int num_interpolation_points = (coarse_waypoints_s[coarse_waypoints_s.size()-1] - coarse_waypoints_s[0]) / dist_inc;
+    // The last s minus the first s, divided by dist_inc, so it's the number of segments of dist_inc, between the beginning and the end.
+
+    The output of the code segment:
+    vector<double>
+    interpolated_waypoints_s,
+    interpolated_waypoints_x,
+    interpolated_waypoints_y,
+    interpolated_waypoints_dx,
+    interpolated_waypoints_dy;
+
+    The interpolation logic:
+    for interpolated_waypoints_s, just starting from the beginning s, with dist_inc increment:
+    #+NAME:
+    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      interpolated_waypoints_s.push_back(coarse_waypoints_s[0]);
+      for (int i = 1; i < num_interpolation_points; i++) {
+        interpolated_waypoints_s.push_back(coarse_waypoints_s[0] + i * dist_inc);
+       }
+    #+END_SRC
+
+    For the others, use interpolate_points to compute, based on coarse_waypoints_{s, x, y, dx, dy}
+    with parameters dist_inc, num_interpolation_points:
+    interpolated_waypoints_x  = interpolate_points(coarse_waypoints_s, coarse_waypoints_x,  dist_inc, num_interpolation_points);
+    interpolated_waypoints_y  = interpolate_points(coarse_waypoints_s, coarse_waypoints_y,  dist_inc, num_interpolation_points);
+    interpolated_waypoints_dx = interpolate_points(coarse_waypoints_s, coarse_waypoints_dx, dist_inc, num_interpolation_points);
+    interpolated_waypoints_dy = interpolate_points(coarse_waypoints_s, coarse_waypoints_dy, dist_inc, num_interpolation_points);
+
+    So this code segment's main dependency is coarse_waypoints_{s, x, y, dx, dy} data, and the routine interpolate_points
+
+    Here is the code of interpolate_points
+    #+NAME:interpolate_points
+    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
+                                        double interval, int output_size) {
+        // uses the spline library to interpolate points connecting a series of x and y values
+        // output is output_size number of y values beginning at y[0] with specified fixed interval
+
+        if (pts_x.size() != pts_y.size()) {
+          cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
+          return { 0 };
+        }
+
+        tk::spline s;
+        s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
+        vector<double> output;
+        for (int i = 0; i < output_size; i++) {
+          output.push_back(s(pts_x[0] + i * interval));
+        }
+        return output;
+      }
+    #+END_SRC
+    
+    It construct a function y= s(x) from x to y by spline, then produce points of [x, y], 
+    where x are evently spaced by dist_inc, and y = s(x)
+
+#+NAME:interpolate_points
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // interpolation parameters
+  double dist_inc = 0.5;
+  int num_interpolation_points = (coarse_waypoints_s[coarse_waypoints_s.size()-1] - coarse_waypoints_s[0]) / dist_inc;
+  vector<double> interpolated_waypoints_s, interpolated_waypoints_x, interpolated_waypoints_y,
+    interpolated_waypoints_dx, interpolated_waypoints_dy;
+  // interpolated s is simply...
+  interpolated_waypoints_s.push_back(coarse_waypoints_s[0]);
+  for (int i = 1; i < num_interpolation_points; i++) {
+    interpolated_waypoints_s.push_back(coarse_waypoints_s[0] + i * dist_inc);
+   }
+  interpolated_waypoints_x = interpolate_points(coarse_waypoints_s, coarse_waypoints_x, dist_inc, num_interpolation_points);
+  interpolated_waypoints_y = interpolate_points(coarse_waypoints_s, coarse_waypoints_y, dist_inc, num_interpolation_points);
+  interpolated_waypoints_dx = interpolate_points(coarse_waypoints_s, coarse_waypoints_dx, dist_inc, num_interpolation_points);
+  interpolated_waypoints_dy = interpolate_points(coarse_waypoints_s, coarse_waypoints_dy, dist_inc, num_interpolation_points);
+
+  // // DEBUG
+  // cout << "number of interpolated points: " << num_interpolation_points << endl;
+  // cout << "interp s: ";
+  // for (int i = 0; i <= num_interpolation_points; i += num_interpolation_points/4-1) {
+  // 	cout << "(" << i << ")" << interpolated_waypoints_s[i] << " ";
+  // }
+  // cout << endl;
+  // cout << "interp x: ";
+  // for (int i = 0; i <= num_interpolation_points; i += num_interpolation_points/4-1) {
+  // 	cout << "(" << i << ")" << interpolated_waypoints_x[i] << " ";
+  // }
+  // cout << endl;
+  // cout << "interp y: ";
+  // for (int i = 0; i <= num_interpolation_points; i += num_interpolation_points/4-1) {
+  // 	cout << "(" << i << ")" << interpolated_waypoints_y[i] << " ";
+  // }
+  // cout << endl;
+  // cout << "interp dx: ";
+  // for (int i = 0; i <= num_interpolation_points; i += num_interpolation_points/4-1) {
+  // 	cout << "(" << i << ")" << interpolated_waypoints_dx[i] << " ";
+  // }
+  // cout << endl;
+  // cout << "interp dy: ";
+  // for (int i = 0; i <= num_interpolation_points; i += num_interpolation_points/4-1) {
+  // 	cout << "(" << i << ")" << interpolated_waypoints_dy[i] << " ";
+  // }
+  // cout << endl << endl;
+
+  // // LOG
+  // // just once...
+  // if (previous_path_x.size() == 0) {
+  // 	log_file << "interp s, interp x, interp y, interp dx, interp dy" << endl;
+  // 	for (int i = 0; i < interpolated_waypoints_dx.size(); i++) {
+  // 		log_file << interpolated_waypoints_s[i] << ", " << interpolated_waypoints_x[i] << ", " << interpolated_waypoints_y[i] << ", " << interpolated_waypoints_dx[i] << ", "<< interpolated_waypoints_dy[i] << endl;
+  // 	}
+  // 	log_file << endl;
+  // }
+#+END_SRC
+
+coarse_waypoints are used in interpolation. It's extarcted from waypoints_map near the car Ego.
+
+*** prepare-coarse-waypoints
+
+    My expectation: this is one of the most intriguing part of the code.
+    I want to learn on how the coarse waypoints are computed, and why they are computed as such.
+
+    In short, coarse_waypoints are just the nearby waypoints that
+    a. Their s values are calibrated to avoid the jump of value (discontinuity.
+    b. All the others values are collected in the same sequence,
+    so that coarse_waypoints_{s, x, y, dx, dy} can be used for getXY, and getFrenet with better accuracy.
+
+    The calibration of s value could have been done through applying fmod by TRACK_LENGTH when accessing waypoints' s value?
+    I doubt how useful this would? I guess that I might use fmod in getXY, and getFrenet to ensure the same continuity.
+
+    I'd better read his documentation to further understand his intention.
+
+    It's surprising short code amount of code.
+
+    It uses NextWaypoint to find the nearest waypoint, next_waypoint_index in the original waypoint map.
+
+    Then somehow further compute the coarse waypoints near the car's position.
+
+    The coarse waypoints computed: coarse_waypoints_{s, x, y, dx, dy}
+
+    Define the waypoint neighborhood of the next waypoint to the car's current position.
+
+    #define NUM_WAYPOINTS_BEHIND 5
+	  #define NUM_WAYPOINTS_AHEAD  5
+
+    Deal with a circular waypoints path for the points near the car.
+
+    current_s is s of the waypoint near the next waypoint to the car at the current.
+    base_s is the actual s of the next waypoint to the car at the current.
+
+    #define TRACK_LENGTH 6945.554           // meters
+    It seems calibrating the inaccuracy:
+    #+NAME:calibrating
+    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      if (i < 0 // this neighbor point (current_s) should closer to the point 0 than base_s,
+          // i.e. it should be base_s <= current_s
+          &&
+          current_s > base_s
+          // on the contrary,
+          ) {
+        current_s -= TRACK_LENGTH;    // fix it by wrapping around
+      }
+
+      if (i > 0                       // this neighbor point (current_s) should be further away from point 0 than base_s
+          &&                          // i.e. it should be current_s <= base_s
+          current_s < base_s          // on the contrary,
+          ) {
+        current_s += TRACK_LENGTH;    // fix it by wrapping around
+      }
+
+    #+END_SRC
+
+    The rest of the code just put the fixed s waypoints into coarse_waypoints_s in sequence.
+    For coarse_waypoints_{x, y, dx, dy} no change, but put them in for the consistent order.
+
+#+NAME:prepare-coarse_waypoints
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // ********************* CONSTRUCT INTERPOLATED WAYPOINTS OF NEARBY AREA **********************
+  int num_waypoints = map_waypoints_x.size();
+  int next_waypoint_index = NextWaypoint(car_x, car_y, car_yaw, map_waypoints_x, map_waypoints_y);
+  vector<double> coarse_waypoints_s, coarse_waypoints_x, coarse_waypoints_y,
+    coarse_waypoints_dx, coarse_waypoints_dy;
+  for (int i = -NUM_WAYPOINTS_BEHIND; i < NUM_WAYPOINTS_AHEAD; i++) {
+    // for smooting, take so many previous and so many subsequent waypoints
+    int idx = (next_waypoint_index+i) % num_waypoints;
+    if (idx < 0) {
+      // correct for wrap
+      idx += num_waypoints;
+    }
+    // correct for wrap in s for spline interpolation (must be continuous)
+    double current_s = map_waypoints_s[idx];
+    double base_s = map_waypoints_s[next_waypoint_index];
+    if (i < 0 && current_s > base_s) {
+      current_s -= TRACK_LENGTH;
+    }
+    if (i > 0 && current_s < base_s) {
+      current_s += TRACK_LENGTH;
+    }
+    coarse_waypoints_s.push_back(current_s);
+    coarse_waypoints_x.push_back(map_waypoints_x[idx]);
+    coarse_waypoints_y.push_back(map_waypoints_y[idx]);
+    coarse_waypoints_dx.push_back(map_waypoints_dx[idx]);
+    coarse_waypoints_dy.push_back(map_waypoints_dy[idx]);
+   }
+
+  // // DEBUG
+  // cout << "****WAYPOINT INTERPOLATION****" << endl;
+  // cout << "coarse s: ";
+  // for (auto s: coarse_waypoints_s) cout << s << ", ";
+  // cout << endl;
+  // cout << "coarse x: ";
+  // for (auto x: coarse_waypoints_x) cout << x << ", ";
+  // cout << endl;
+  // cout << "coarse y: ";
+  // for (auto y: coarse_waypoints_y) cout << y << ", ";
+  // cout << endl;
+  // cout << "coarse dx: ";
+  // for (auto dx: coarse_waypoints_dx) cout << dx << ", ";
+  // cout << endl;
+  // cout << "coarse dy: ";
+  // for (auto dy: coarse_waypoints_dy) cout << dy << ", ";
+  // cout << endl;
+
+  // // LOG
+  // if (previous_path_x.size() == 0) {
+  // 	log_file << "waypoints" << endl << "coarse s, coarse x, coarse y, coarse dx, coarse dy" << endl;
+  // 	for (int i = 0; i < coarse_waypoints_dx.size(); i++) {
+  // 		log_file << coarse_waypoints_s[i] << ", " << coarse_waypoints_x[i] << ", " << coarse_waypoints_y[i] << ", " << coarse_waypoints_dx[i] << ", "<< coarse_waypoints_dy[i] << endl;
+  // 	}
+  // 	log_file << endl;
+  // }
+#+END_SRC
+
+*** get-telemetry-data
+   The code is self-explanatory. But this is the source of data from simulator, the only live data source.
+#+NAME:get-telemetry-data
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // j[1] is the data JSON object
+            // Main car's localization Data
+            double car_x = j[1]["x"];
+            double car_y = j[1]["y"];
+            double car_s = j[1]["s"];
+            double car_d = j[1]["d"];
+            double car_yaw = j[1]["yaw"];
+            double car_speed = j[1]["speed"];
+            car_speed *= 0.44704;  														// convert mph to m/s
+            // Previous path data given to the Planner
+            auto previous_path_x = j[1]["previous_path_x"];
+            auto previous_path_y = j[1]["previous_path_y"];
+            // Previous path's end s and d values
+            double end_path_s = j[1]["end_path_s"];
+            double end_path_d = j[1]["end_path_d"];
+            // Sensor Fusion Data, a list of all other cars on the same side of the road.
+            auto sensor_fusion = j[1]["sensor_fusion"];
+#+END_SRC
+
+*** read-waypoints
+    The expectation of this segment is to understand the structure of the map of waypoints.
+    Whether it's a good idea to do some calibration when reading?
+
+    Note: main scope variable declaration, not necessarily should be here. Nevertheless, pay attention to:
+    uWS::Hub h; // the communication framework handle.
+    Vehicle my_car = Vehicle(); // the object for Ego
+
+    based the reading routine,
+    the waypoint record consists of x, y, s, d_x, d_y.
+
+
+
+#+NAME:read-waypoints
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  uWS::Hub h;
+
+    // Load up map values for waypoint's x,y,s and d normalized normal vectors
+    vector<double> map_waypoints_x;
+    vector<double> map_waypoints_y;
+    vector<double> map_waypoints_s;
+    vector<double> map_waypoints_dx;
+    vector<double> map_waypoints_dy;
+
+    Vehicle my_car = Vehicle();
+
+    // Waypoint map to read from
+    string map_file_ = "../data/highway_map.csv";
+    // The max s value before wrapping around the track back to 0
+    double max_s = 6945.554;
+
+    ifstream in_map_(map_file_.c_str(), ifstream::in);
+    ofstream log_file;
+    log_file.open("path_planning_log.csv");
+
+    string line;
+    while (getline(in_map_, line)) {
+      istringstream iss(line);
+      double x;
+      double y;
+      float s;
+      float d_x;
+      float d_y;
+      iss >> x;
+      iss >> y;
+      iss >> s;
+      iss >> d_x;
+      iss >> d_y;
+      map_waypoints_x.push_back(x);
+      map_waypoints_y.push_back(y);
+      map_waypoints_s.push_back(s);
+      map_waypoints_dx.push_back(d_x);
+      map_waypoints_dy.push_back(d_y);
+    }
+#+END_SRC
+
+*** getXY
+
+    Expectation: to understand how getXY works, from s, d to x, y
+    At the high level, the (x, y), corresponding to (s, d), is computed by finding the nearest waypoint in front of (s, d), and
+    based on the waypoint's (x, y), with geometry reasoning of shift/translation, to get the corresponding (x, y)
+
+    important cursor:	int prev_wp = -1; // start with -1
+    effectively starting from the beginning of map_s, search the first waypoint, prev_wp, s_a values, such that s <= s_a
+    (find the first waypoint in front of s, chasing s from the start of the map_s)
+
+    int wp2 would be the next waypoint ahead of the one found.
+
+    Use the two waypoints to compute the heading angle: heading
+
+    Compute the delta s between prev_wy and s, assume the two waypoints's vector represent the lane's heading at the s position.
+    Compute the projection of delta s onto the local x, and y axis, plus the prev_wp's (x, y) coordinates.
+
+    // the x,y,s along the segment
+	  double seg_s = (s-maps_s[prev_wp]);
+	  double seg_x = maps_x[prev_wp]+seg_s*cos(heading); // It seems to me that the + should -
+	  double seg_y = maps_y[prev_wp]+seg_s*sin(heading); // It seems to me that the + should -
+
+	  double perp_heading = heading-pi()/2;
+	  double x = seg_x + d*cos(perp_heading);
+	  double y = seg_y + d*sin(perp_heading);
+	  return {x,y};
+
+    This is best illustrated by a diagram.
+
+
+    This algorithm will work any list of waypoints, as long as the s values are in increasing order, so it should work with
+    coarse_waypoints_{s, x, y}
+
+
+#+NAME:getXY
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // Transform from Frenet s,d coordinates to Cartesian x,y
+  vector<double> getXY(double s, double d,
+                       vector<double> maps_s, vector<double> maps_x, vector<double> maps_y)
+  {
+    int prev_wp = -1;
+    while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
+    {
+      prev_wp++;
+    }
+    int wp2 = (prev_wp+1)%maps_x.size();
+    double heading = atan2((maps_y[wp2]-maps_y[prev_wp]),(maps_x[wp2]-maps_x[prev_wp]));
+    // the x,y,s along the segment
+    double seg_s = (s-maps_s[prev_wp]);
+    double seg_x = maps_x[prev_wp]+seg_s*cos(heading);
+    double seg_y = maps_y[prev_wp]+seg_s*sin(heading);
+    double perp_heading = heading-pi()/2;
+    double x = seg_x + d*cos(perp_heading);
+    double y = seg_y + d*sin(perp_heading);
+    return {x,y};
+  }
+#+END_SRC
+
+*** getFrenet
+
+    The expectation: understand how getFrenet works.
+
+    The key dependency is to be able to find the NextWaypoint given x, y.
+
+    This is harder to understand now. I'll think and study later.
+
+    The computation of frenet_s:
+
+
+    The computation of frenet_d
+#+NAME:getFrenet
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
+  vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y, vector<double> maps_s)
+  {
+    int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
+    int prev_wp;
+    prev_wp = next_wp-1;
+    if(next_wp == 0)
+    {
+      prev_wp  = maps_x.size()-1;
+    }
+    double n_x = maps_x[next_wp]-maps_x[prev_wp];
+    double n_y = maps_y[next_wp]-maps_y[prev_wp];
+    double x_x = x - maps_x[prev_wp];
+    double x_y = y - maps_y[prev_wp];
+    // find the projection of x onto n
+    double proj_norm = (x_x*n_x+x_y*n_y)/(n_x*n_x+n_y*n_y);
+    double proj_x = proj_norm*n_x;
+    double proj_y = proj_norm*n_y;
+    double frenet_d = distance(x_x,x_y,proj_x,proj_y);
+    //see if d value is positive or negative by comparing it to a center point
+    double center_x = 1000-maps_x[prev_wp];
+    double center_y = 2000-maps_y[prev_wp];
+    double centerToPos = distance(center_x,center_y,x_x,x_y);
+    double centerToRef = distance(center_x,center_y,proj_x,proj_y);
+    if(centerToPos <= centerToRef)
+    {
+      frenet_d *= -1;
+    }
+    // calculate s value
+    double frenet_s = maps_s[0];
+    for(int i = 0; i < prev_wp; i++)
+    {
+      frenet_s += distance(maps_x[i],maps_y[i],maps_x[i+1],maps_y[i+1]);
+    }
+    frenet_s += distance(0,0,proj_x,proj_y);
+    return {frenet_s,frenet_d};
+  }
+#+END_SRC
+
+*** NextWaypoint
+#+NAME:NextWaypoint
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
+{
+	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
+	double map_x = maps_x[closestWaypoint];
+	double map_y = maps_y[closestWaypoint];
+	double heading = atan2( (map_y-y),(map_x-x) );
+	double angle = abs(theta-heading);
+	if(angle > pi()/4)
+	{
+		closestWaypoint++;
+	}
+	return closestWaypoint;
+}
+#+END_SRC
+
+*** ClosestWaypoint
+#+NAME:ClosestWaypoint
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)
+{
+	double closestLen = 100000; //large number
+	int closestWaypoint = 0;
+
+	for(int i = 0; i < maps_x.size(); i++)
+	{
+		double map_x = maps_x[i];
+		double map_y = maps_y[i];
+		double dist = distance(x,y,map_x,map_y);
+		if(dist < closestLen)
+		{
+			closestLen = dist;
+			closestWaypoint = i;
+		}
+	}
+	return closestWaypoint;
+}
+
+
+#+END_SRC
+
+*** preamble
+#+NAME:preamble
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none 
+  #include <fstream>
+  #include <math.h>
+  #include <uWS/uWS.h>
+  #include <chrono>
+  #include <iostream>
+  #include <thread>
+  #include <vector>
+  #include <algorithm>
+  #include "Eigen-3.3/Eigen/Core"
+  #include "Eigen-3.3/Eigen/QR"
+  #include "json.hpp"
+  #include "smoother.h"
+  #include "constants.h"
+  #include "vehicle.h"
+  #include "costs.h"
+
+  using namespace std;
+
+  // for convenience
+  using json = nlohmann::json;
+
+  // For converting back and forth between radians and degrees.
+  constexpr double pi() { return M_PI; }
+  double deg2rad(double x) { return x * pi() / 180; }
+  double rad2deg(double x) { return x * 180 / pi(); }
+
+  // Checks if the SocketIO event has JSON data.
+  // If there is data the JSON object in string format will be returned,
+  // else the empty string "" will be returned.
+  string hasData(string s) {
+    auto found_null = s.find("null");
+    auto b1 = s.find_first_of("[");
+    auto b2 = s.find_first_of("}");
+    if (found_null != string::npos) {
+      return "";
+    } else if (b1 != string::npos && b2 != string::npos) {
+      return s.substr(b1, b2 - b1 + 2);
+    }
+    return "";
+  }
+
+  double distance(double x1, double y1, double x2, double y2)
+  {
+    return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
+  }
+
+#+END_SRC
+
+* Lessons
+** Lessons: Seems a good idea to read code top-down
+
+   With unfamiliar code base, start with the entry, main, starting
+  from the bottom, the last functional segment of the main, then gradually understand the rest with the last segment as the
+  context, motivation.
+
+  This approach can orient oneself to have the whole picture, avoid distraction.
+
+ Also paraphasing and note taking with literate programming style also helps.
+
+** Lessons: It is a good idea to set the expectation when starting to read a segment of code
+
+   This will help to drive through when facing obstacles.
+
+* Next: game plan:
+  2. re-study his README for high level design idea
+  1. understand how NextWaypoint, and getFrenet work?
+  3. Sketch my understand of his high level design, especially data flow, reverse from next_{x, y}_vals upto simulator input, and map_waypoints, etc.
+  4. Improve my implementation, especially, the target velocity calculation.
