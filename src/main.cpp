@@ -57,7 +57,7 @@ const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
 = MAX_JERK_METERS_PER_SECOND_CUBIC * UPDATE_INTERVAL;
 const double COLLISION_C  = .1E6f;
 const double DANGER_C     = .1E5f;
-const double EFFICIENCY_C = .1E3f;
+const double EFFICIENCY_C = .1E4f;
 const double NOT_MIDDLE_C = .1E2f;
 const double LANE_CHANGE_C= .1E1f;
 const double NEAR_ZERO = .1E-3f;
@@ -816,7 +816,7 @@ int main() {
             
             my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
             
-            DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, 0*UPDATE_INTERVAL); // Just consider the current gap, look ahead by 10 interval for potential collision
+            DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, 10*UPDATE_INTERVAL); // look ahead by 10 interval for potential collision
             vector<double> next_d = {car_d, car_d, car_d}; // the d coordinates for the seeding points for spline
             
             ios::fmtflags old_settings = cout.flags();
@@ -1011,7 +1011,7 @@ int main() {
               }
               log.close();
              }
-            
+             cout.flags(old_settings);
             // END of DEBUG
 
             json msgJson;
