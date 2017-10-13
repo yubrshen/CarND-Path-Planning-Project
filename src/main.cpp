@@ -948,7 +948,7 @@ int main() {
             target_v = min(SPEED_LIMIT, target_v);
             
             cout << "target_v: " << target_v;
-            const double VELOCITY_INCREMENT_LIMIT = 0.12;
+            const double VELOCITY_INCREMENT_LIMIT = 0.125;
             double v_increment = 0;
             
             cout << ", updated_s: ";
