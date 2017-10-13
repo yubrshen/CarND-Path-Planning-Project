@@ -896,7 +896,7 @@ double not_middle_lane_cost(vector<double> d_traj) {
 }
 #+END_SRC
 
-*** TODO generate-predictions-from-sensor-fusion-data
+*** generate-predictions-from-sensor-fusion-data
 
     My expectation to this part is the production of predictions of the other vehicles
     (rather than predictions, it actually just compile the s, and d for the other vehicles.)
@@ -978,6 +978,7 @@ predictions[i][1] lane number.
   }
 #+END_SRC
 
+
 Understanding of N_SAMPLES:
 based on the following expression:
 double t = traj_start_time + (i * duration/N_SAMPLES);
@@ -997,6 +998,24 @@ double traj_start_time = subpath_size * PATH_DT;
 
 Let's do an experiment of changing DT to PATH_DT, to see if it still works.
 
+Yes and No, by simplying changing DT to PATH_DT, it still works:
+double duration = N_SAMPLES * PATH_DT - subpath_size * PATH_DT;
+but it does work as well, there are much more collision,
+and Ego tends to approach the car in front too close.
+Since, N_SAMPLES = 20, subpath_size = 25, the duration becomes negative in the above modification.
+This may cause unexpected behavior!
+
+Finally, make it as follows:
+double duration = N_SAMPLES * PATH_DT;
+This seems working, but it still has some jerk incidents. I'm not sure if it's caused by the change or just random factors such as CPU loading.
+This might suggest that subpath_size may need to be larger than 25, to avoid the random factors.
+(Changing N_SAMPLES to 30 does not help. I changed the wrong!)
+
+Note: changing duration to
+double duration = N_SAMPLES * PATH_DT;
+then duration/N_SAMPLES == PATH_DT, it would be just the update_interval increment of time.
+This seems a correct intuition and also align with my interpretation in my implementation.
+
 Qusetion: are all the car's data required. My approach are just collecting the nearest.
 It seems to me that it has no material difference.
 
@@ -1007,7 +1026,9 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
   // ********************* GENERATE PREDICTIONS FROM SENSOR FUSION DATA **************************
   // The data format for each car is: [ id, x, y, vx, vy, s, d]. The id is a unique identifier for that car. The x, y values are in global map coordinates, and the vx, vy values are the velocity components, also in reference to the global map. Finally s and d are the Frenet coordinates for that car.
-  double duration = N_SAMPLES * DT - subpath_size * PATH_DT;
+  //double duration = N_SAMPLES * DT - subpath_size * PATH_DT;
+  double duration = N_SAMPLES * PATH_DT; // - subpath_size * PATH_DT;
+
   vector<Vehicle> other_cars;
   map<int, vector<vector<double>>> predictions;
   for (auto sf: sensor_fusion) {
@@ -1345,7 +1366,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
     So this code segment's main dependency is coarse_waypoints_{s, x, y, dx, dy} data, and the routine interpolate_points
 
     Here is the code of interpolate_points
-    #+NAME:interpolate_points
+    #+NAME:interpolate_points_function_def
     #+BEGIN_SRC C++ :noweb yes :tangle :exports none
       vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
                                         double interval, int output_size) {
@@ -1368,7 +1389,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
     #+END_SRC
     
     It construct a function y= s(x) from x to y by spline, then produce points of [x, y], 
-    where x are evently spaced by dist_inc, and y = s(x)
+    where x are evenly spaced by dist_inc, and y = s(x)
 
 #+NAME:interpolate_points
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
@@ -1426,7 +1447,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
   // }
 #+END_SRC
 
-coarse_waypoints are used in interpolation. It's extarcted from waypoints_map near the car Ego.
+coarse_waypoints are used in interpolation. It's extracted from waypoints_map near the car Ego.
 
 *** prepare-coarse-waypoints
 
@@ -1844,7 +1865,7 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
    This will help to drive through when facing obstacles.
 
 * Next: game plan:
-  2. re-study his README for high level design idea
+  2. DONE: re-study his README for high level design idea
   1. understand how NextWaypoint, and getFrenet work?
-  3. Sketch my understand of his high level design, especially data flow, reverse from next_{x, y}_vals upto simulator input, and map_waypoints, etc.
+  3. DONE: Sketch my understand of his high level design, especially data flow, reverse from next_{x, y}_vals upto simulator input, and map_waypoints, etc.
   4. Improve my implementation, especially, the target velocity calculation.
