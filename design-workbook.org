@@ -348,9 +348,9 @@ string hasData(string s) {
   // from experiment, it seems 25 might be too few when the CPU is busy.
 
   const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
-  // const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
-  // = MAX_ACCELERATION_METERS_PER_SECOND_SQUARE * UPDATE_INTERVAL;
-  const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL = 0.015; // The above seems too big still
+  const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
+  = MAX_ACCELERATION_METERS_PER_SECOND_SQUARE * UPDATE_INTERVAL;
+  // const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL = 0.015; // The above seems too big still
 
   const double MAX_JERK_METERS_PER_SECOND_CUBIC = 10; // meter/s^3
   const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
@@ -583,7 +583,7 @@ This computation is based on the quiz on behavior planning.
 #+NAME:prepare_lane_change
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
 double gap_behind = data_lanes.lanes[lane_changed_to].gap_behind;
-  cout << "gap_behind: " << setw(7) << gap_behind << ", ";
+  // cout << "gap_behind: " << setw(7) << gap_behind << ", ";
 
 #+END_SRC
 
@@ -862,8 +862,8 @@ Compute the decision should the maneuver is performed.
 #+NAME:inefficiency_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
   double inefficiency_cost_f(Decision decision, CarDescription my_car,DATA_LANES data_lanes) {
-    double projected_v = (my_car.v + decision.projected_kinematics["acceleration"]*60);
-    // expect the speed can match SPEED_LIMIT in 60 seconds
+    double projected_v = (my_car.v + decision.projected_kinematics["acceleration"]*UPDATE_INTERVAL);
+    // expect the speed can match SPEED_LIMIT in 1 UPDATE_INTERVAL seconds
     double cost = pow((SPEED_LIMIT - projected_v)/SPEED_LIMIT, 2);
     return cost;
   }
@@ -1013,17 +1013,17 @@ Here is the core of the path plan, computing a series of x, y values for the sim
 
   my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
 
-  DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, 10*UPDATE_INTERVAL); // look ahead by 10 interval for potential collision
+  DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, 5*UPDATE_INTERVAL); // look ahead by a few intervals for potential collision
   vector<double> next_d = {car_d, car_d, car_d}; // the d coordinates for the seeding points for spline
 
-  ios::fmtflags old_settings = cout.flags();
+  //ios::fmtflags old_settings = cout.flags();
   Decision decision;
   decision.maneuver = KL; // default
-  cout.precision(2);
-  cout << "fr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_front.empty &&
-                         (data_lanes.lanes[my_car.lane_index].gap_front <= 0)) << ", ";
-  cout << "rr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_back.empty &&
-                         (data_lanes.lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
+  // cout.precision(2);
+  // cout << "fr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_front.empty &&
+  //                        (data_lanes.lanes[my_car.lane_index].gap_front <= 0)) << ", ";
+  // cout << "rr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_back.empty &&
+  //                        (data_lanes.lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
   decision = maneuver(my_car, data_lanes);
   int shift_direction = 0;
   if (decision.maneuver == LCL) {
@@ -1039,8 +1039,8 @@ Here is the core of the path plan, computing a series of x, y values for the sim
             car_d + shift_direction * lane_gap * 0.5
   };
 
-  cout << ", next lane: " << decision.lane_index_changed_to;
-  cout << " prev lane: " << my_car.lane_index; // << endl;
+  // cout << ", next lane: " << decision.lane_index_changed_to;
+  // cout << " prev lane: " << my_car.lane_index; // << endl;
 
   // seeding points to generate smooth trajectory through spline
   vector<double> ptsx;
@@ -1059,8 +1059,8 @@ Here is the core of the path plan, computing a series of x, y values for the sim
   // only the first portion of the remaining_path is used in the new trajectory planning.
   // This is a trade-off of considering continuity, and the delay in path planner in providing new
   // trajectory.
-  cout << ", remaining_path_adopted_size: " << remaining_path_adopted_size;
-  cout << endl;
+  // cout << ", remaining_path_adopted_size: " << remaining_path_adopted_size;
+  // cout << endl;
 
   // For smooth path generation, replace car_s by
   // the end of the s at the adopted remaining path
@@ -1144,40 +1144,40 @@ Here is the core of the path plan, computing a series of x, y values for the sim
   double target_v = max(my_car.v + target_a * new_traj_size, 10.0); // make the minimum speed to be 10 meters/second
   target_v = min(SPEED_LIMIT, target_v);
 
-  cout << "target_v: " << target_v;
-  const double VELOCITY_INCREMENT_LIMIT = 0.125;
+  // cout << "target_v: " << target_v;
+  // const double VELOCITY_INCREMENT_LIMIT = 0.125;
   double v_increment = 0;
 
-  cout << ", updated_s: ";
+  // cout << ", updated_s: ";
   for (int i = 0; i < new_traj_size; i++) {
-    if (fabs(updated_v - target_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
+    if (fabs(updated_v - target_v) < 0.001) {
       v_increment = 0;
     } else {
-      v_increment = copysign(VELOCITY_INCREMENT_LIMIT, target_v - updated_v);
+      v_increment = copysign(0.125, target_v - updated_v);
     }
     updated_v += v_increment;
     updated_s += fmod(updated_v * UPDATE_INTERVAL, MAX_S);
     velocity_spaced_s_traj.push_back(updated_s);
-    cout << updated_s << ", ";
+    //cout << updated_s << ", ";
    }
 
-  cout << endl;
+  // cout << endl;
 
   volocity_spaced_x_traj = interpolate_points(ptss, ptsx, velocity_spaced_s_traj);
   volocity_spaced_y_traj = interpolate_points(ptss, ptsy, velocity_spaced_s_traj);
   // DEBUG
-  if (true // update_count == 0
-      ) {
-    update_count += 1;
-    ofstream log;
-    log.open("trajactory_xys.csv");
-    log << "x,y,s" << endl;
-    for (int i = 0; i < new_traj_size; i++) {
-      log << volocity_spaced_x_traj[i] << ", " << volocity_spaced_y_traj[i] <<
-        ", " << velocity_spaced_s_traj[i] << endl;
-    }
-    log.close();
-   }
+  // if (true // update_count == 0
+  //     ) {
+  //   update_count += 1;
+  //   ofstream log;
+  //   log.open("trajactory_xys.csv");
+  //   log << "x,y,s" << endl;
+  //   for (int i = 0; i < new_traj_size; i++) {
+  //     log << volocity_spaced_x_traj[i] << ", " << volocity_spaced_y_traj[i] <<
+  //       ", " << velocity_spaced_s_traj[i] << endl;
+  //   }
+  //   log.close();
+  //  }
 
   // END of DEBUG
 
@@ -1197,18 +1197,18 @@ Here is the core of the path plan, computing a series of x, y values for the sim
     next_y_vals.push_back(volocity_spaced_y_traj[i]);
    }
   // DEBUG
-  if (true // update_count == 1
-      ) {
-    update_count += 1;
-    ofstream log;
-    log.open("trajactory_xy.csv");
-    log << "x,y" << endl;
-    for (int i = remaining_path_adopted_size; i < next_y_vals.size(); i++) {
-      log << next_x_vals[i] << ", " << next_y_vals[i] << endl;
-    }
-    log.close();
-   }
-   cout.flags(old_settings);
+  // if (true // update_count == 1
+  //     ) {
+  //   update_count += 1;
+  //   ofstream log;
+  //   log.open("trajactory_xy.csv");
+  //   log << "x,y" << endl;
+  //   for (int i = remaining_path_adopted_size; i < next_y_vals.size(); i++) {
+  //     log << next_x_vals[i] << ", " << next_y_vals[i] << endl;
+  //   }
+  //   log.close();
+  //  }
+  //  cout.flags(old_settings);
   // END of DEBUG
 #+END_SRC
 
@@ -1237,11 +1237,11 @@ The structure Decision represent all the consequence of a maneuver decision incl
     map<MANEUVER_STATE, Decision> decisions;
     for (auto proposed_state:states) {
       Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-      cout << state_str(proposed_state) << ", cost: " << setw(7) <<  a_decision.cost << ", ";
+      // cout << state_str(proposed_state) << ", cost: " << setw(7) <<  a_decision.cost << ", ";
       decisions[proposed_state] = a_decision;
     }
     Decision decision = min_map_element(decisions)->second;
-    cout << "Selected maneuver: " << setw(4) << state_str(decision.maneuver) << ", cost: " << setw(7) << decision.cost << " ";
+    // cout << "Selected maneuver: " << setw(4) << state_str(decision.maneuver) << ", cost: " << setw(7) << decision.cost << " ";
     return decision;
   }
 
