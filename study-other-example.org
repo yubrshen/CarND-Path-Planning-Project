@@ -1,5 +1,5 @@
 #+LATEX_CLASS: article
-#+LATEX_CLASS_OPTIONS:
+#+LATEX_CLASS_OPTIONS: [8pt]
 #+LATEX_HEADER:
 #+LATEX_HEADER_EXTRA:
 #+DESCRIPTION:
@@ -7,6 +7,8 @@
 #+SUBTITLE:
 #+LATEX_COMPILER: pdflatex
 #+DATE: \today
+#+OPTIONS: ^:nil
+#+LATEX: \pagenumbering{arabic}
 
 #+TITLE: Study jeremy-shannon/CarND-Path-Planning-Project
 * Study README
@@ -22,22 +24,31 @@ Very impressive performance.
 
 ** Data flow (reverse)
 
+#+BEGIN_QUOTE
    Final output: next_{x, y}_vals, trajectory fed to simulator
 
    previous_path_{x, y} (only the first subpath)^
+
    coarse_{s, x, y}_traj ! interpolated_{x, y}_traj ^
+
    pos_s ^ | s_dot (current speed) ^ | PATH_DT ^ | target_d (best_target[1][0]) -> v_incr -> interpolated_s_traj ^
 
    last two points from first portion of the remaining trajectory | (best position, best_lane, and speed -> two points 30 meter, 60 meters ahead of the end of the adopted remaining trajectory in the target lane   -> seeds for trajectory ^
    best maneuver (lane, speed, acceleration)^
+
    cost of each maneuver^
+
    possible maneuvers, and corresponding lane, speed, acceleration, and trajectory^ | predictions (other cars' trajectory)^
+
    original input:
+
    map_waypoints_{s, d, x, y, dx, dy} -> coarse_waypoints_{s, d, x, y, dx, dy} -> interpolated_waypoints_{s, d, x, y, dx, dy} ^ | telemetry input ^ | remaining trajectory ^
+
+#+END_QUOTE
 * Study the main and entries for control
 
 #+NAME:main
-#+BEGIN_SRC C++ :noweb yes :tangle ../examples/CarND-Path-Planning-Project/src/main.cpp :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle ../examples/CarND-Path-Planning-Project/src/main.cpp
   <<preamble>>
   <<ClosestWaypoint>>
   <<NextWaypoint>>
@@ -152,7 +163,7 @@ Very impressive performance.
 
 ** Code Segments
 
-The code mere are organized top down for ease of understanding.
+The code here are organized top down for ease of understanding.
 
 *** produce-new-path
 
@@ -165,20 +176,43 @@ Eventually, generate the new trajectory x, y in interpolated_x_traj, and interpo
 
 Some annotations:
 
-pos_s is the s value of Ego at the current update car_s
+pos_s is the s value of Ego at the current update car_s, but it's modified by the remaining trajectory, for more details see below.
 
-s_dot is car_speed converted to meters/second
+s_dot is car_speed converted to meters/second, may also be modified by the remaining trajectory's adopted end points.
 
-PATH_DT: #define PATH_DT 0.02 seconds, defined in ../examples/CarND-Path-Planning-Project/src/constants.h
+s_ddot is the acceleration of the car at the current update, may also be modified by the remaining trajectory's adopted end points.
+
+PATH_DT: #define PATH_DT 0.02 // seconds,
+
+defined in ../examples/CarND-Path-Planning-Project/src/constants.h
 the update interval
 
 subpath_size: int subpath_size = min(PREVIOUS_PATH_POINTS_TO_KEEP, (int)previous_path_x.size());
-PREVIOUS_PATH_POINTS_TO_KEEP: #define PREVIOUS_PATH_POINTS_TO_KEEP 25; only take part of the previous_path,
+
+PREVIOUS_PATH_POINTS_TO_KEEP: #define PREVIOUS_PATH_POINTS_TO_KEEP 25;
+
+only take part of the previous_path,
 usually first part of it, the oldest ones from the last update cycle.
 
 angle: the heading angle of Ego in radius, or estimated from previous_path
+
+best_target: a 2x3 array, representing the decision for maneuvor, best_target[0] for s, s_dot, s_ddot, and best_target[1] for d, d_dot, d_ddot, of the chosen.
+Maybe, this is what the author called "trajectory"?
+
+Note: in <<determine-ego-car-parameters-construct-vehicle-object>> pos_s is modified, replacing car_s, s_dot, and s_ddot are also calculated from the
+remaining trajectory's adopted endpoints.
+
+#+NAME:
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+vector<double> frenet = getFrenet(pos_x, pos_y, angle, interpolated_waypoints_x, interpolated_waypoints_y, interpolated_waypoints_s);
+            //vector<double> frenet = getFrenet(pos_x, pos_y, angle, map_waypoints_x, map_waypoints_y, map_waypoints_s);
+            pos_s = frenet[0];
+            pos_d = frenet[1];
+
+#+END_SRC
+
       #+NAME:produce-new-path
-      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      #+BEGIN_SRC C++ :noweb tangle :tangle
         // ********************* PRODUCE NEW PATH ***********************
         // begin by pushing the last and next-to-last point from the previous path for setting the
         // spline the last point should be the first point in the returned trajectory, but because of
@@ -431,7 +465,7 @@ first compute as if there is no car in front,
 
 
  #+NAME:car_jsut_ahead
- #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+ #+BEGIN_SRC C++ :noweb tangle :tangle
    bool car_to_left = false, car_to_right = false, car_just_ahead = false;
    for (Vehicle other_car: other_cars) {
      double s_diff = fabs(other_car.s - car_s);
@@ -450,7 +484,7 @@ first compute as if there is no car in front,
  #+END_SRC
 
  #+NAME:get_target_for_state
- #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+ #+BEGIN_SRC C++ :noweb tangle :tangle
    vector<vector<double>> Vehicle::get_target_for_state(string state, map<int, vector<vector<double>>> predictions, double duration, bool car_just_ahead) {
      // Returns two lists s_target and d_target in a single vector - s_target includes
      // [s, s_dot, and s_ddot] and d_target includes the same
@@ -548,7 +582,7 @@ first compute as if there is no car in front,
  get_leading_vehicle_data_for_lane is defined in vehicle.cpp:
 
  #+NAME:get_leading_vehicle_data_for_lane
- #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+ #+BEGIN_SRC C++ :noweb tange
     vector<double> Vehicle::get_leading_vehicle_data_for_lane(int target_lane, map<int, vector<vector<double>>> predictions, double duration) {
      // returns s and s_dot for the nearest (ahead) vehicle in target lane
      // this assumes the dummy vehicle will keep its lane and velocity, it will return the end position
@@ -607,7 +641,7 @@ first compute as if there is no car in front,
 
    The following code displays the content of best_frenet_traj and predictions:
    #+NAME:display_best_frenet_traj
-   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+   #+BEGIN_SRC C++ :noweb tange
      single_iteration_log << "i,ego s,ego d,s1,d1,s2,d2,s3,d3,s4,d4,s5,d5,s6,d6,s7,d7,s8,d8,s9,d9,s10,d10,s11,d11,s12,d12" << endl;
      for (int i = 0; i < best_frenet_traj[0].size(); i++) {
        single_iteration_log << i << ",";
@@ -625,7 +659,7 @@ first compute as if there is no car in front,
 
    On the other hand, prediction.second (pred_traj) contains 12x2 entries, pred_traj[i][0] for s, and pred_traj[i][1] for d
     #+NAME:determine-best-trajectory
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    #+BEGIN_SRC C++ :noweb tange
       // ******************************* DETERMINE BEST TRAJECTORY ***********************************
       // where the magic happens? NOPE! I WISH - THIS APPORACH HAS BEEN ABANDONED
       // trajectories come back in a list of s values and a list of d values (not zipped together)
@@ -715,7 +749,7 @@ first compute as if there is no car in front,
 
      This is an umbrella function, the concrete logic is in the individual cost functions.
      #+NAME:calculate_total_cost
-     #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+     #+BEGIN_SRC C++ :noweb tange
        double calculate_total_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
 
          double total_cost = 0;
@@ -757,7 +791,7 @@ first compute as if there is no car in front,
       #define VEHICLE_RADIUS 1.25              // meters
 
       #+NAME:collision_cost
-      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      #+BEGIN_SRC C++ :noweb tange
         double collision_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
           // Binary cost function which penalizes collisions.
           double nearest = nearest_approach_to_any_vehicle(s_traj, d_traj, predictions);
@@ -773,7 +807,7 @@ first compute as if there is no car in front,
 
        Based nearest_approach, find the nearest distance to a car no the road.
 #+NAME:nearest_approach_to_any_vehicle
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   double nearest_approach_to_any_vehicle(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
     // Determines the nearest the vehicle comes to any other vehicle throughout a trajectory
     double closest = 999999;
@@ -794,7 +828,7 @@ first compute as if there is no car in front,
         While I'm using a more computation approach.
 
 #+NAME:nearest_approach
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   double nearest_approach(vector<double> s_traj, vector<double> d_traj, vector<vector<double>> prediction) {
     double closest = 999999;
     for (int i = 0; i < N_SAMPLES; i++) {
@@ -812,7 +846,7 @@ first compute as if there is no car in front,
       This may have some overlapping with collision cost, but they have very different coefficients.
 
 #+NAME:buffer_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   double logistic(double x){
     // A function that returns a value between 0 and 1 for x in the range[0, infinity] and - 1 to 1 for x in
     // the range[-infinity, infinity]. Useful for cost functions.
@@ -828,7 +862,7 @@ first compute as if there is no car in front,
 ***** in_lane_buffer_cost
 
       #+NAME:in_lane_buffer_cost
-      #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+      #+BEGIN_SRC C++ :noweb tange
         double in_lane_buffer_cost(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
           // Penalizes getting close to other vehicles.
           double nearest = nearest_approach_to_any_vehicle_in_lane(s_traj, d_traj, predictions);
@@ -839,7 +873,7 @@ first compute as if there is no car in front,
 ****** nearest_approach_to_any_vehicle_in_lane
        Only consider the distance being in the same lane, the rest of the logic of closest approach is the same as that of the other.
 #+NAME:nearest_approach_to_any_vehicle_in_lane
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   double nearest_approach_to_any_vehicle_in_lane(vector<double> s_traj, vector<double> d_traj, map<int,vector<vector<double>>> predictions) {
     // Determines the nearest the vehicle comes to any other vehicle throughout a trajectory
     double closest = 999999;
@@ -864,7 +898,7 @@ first compute as if there is no car in front,
 Rewards high average speeds.
 
 #+NAME:efficiency_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   double efficiency_cost(vector<double> s_traj) {
     // Rewards high average speeds.
     vector<double> s_dot_traj = velocities_for_trajectory(s_traj);
@@ -888,7 +922,7 @@ Rewards high average speeds.
 penalize not shooting for middle lane (d = 6)
 
 #+NAME:not_middle_lane_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
 double not_middle_lane_cost(vector<double> d_traj) {
   // penalize not shooting for middle lane (d = 6)
   double end_d = d_traj[d_traj.size()-1];
@@ -921,7 +955,7 @@ double not_middle_lane_cost(vector<double> d_traj) {
     d_dd: 0
     Vehicle(sf[5], other_car_vel, 0, sf[6], 0, 0);
 #+NAME:Vehicle-construct
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
 Vehicle::Vehicle(double s, double s_d, double s_dd, double d, double d_d, double d_dd) {
 
   this->s    = s;         // s position
@@ -959,7 +993,7 @@ predictions[i][0] for s = start_s + constant_speed * time_to_the_intervals
 predictions[i][1] lane number.
 
 #+NAME:generate_predictions
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   vector<vector<double>> Vehicle::generate_predictions(double traj_start_time, double duration) {
 
     // Generates a list of predicted s and d positions for dummy constant-speed vehicles
@@ -1023,7 +1057,7 @@ Overall structure of predictions: a map from vehicle id to N_SAMPLES x 2,
 predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 0 to N_SAMPLES - 1
 
 #+NAME:generate-predictions-from-sensor-fusion-data
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // ********************* GENERATE PREDICTIONS FROM SENSOR FUSION DATA **************************
   // The data format for each car is: [ id, x, y, vx, vy, s, d]. The id is a unique identifier for that car. The x, y values are in global map coordinates, and the vx, vy values are the velocity components, also in reference to the global map. Finally s and d are the Frenet coordinates for that car.
   //double duration = N_SAMPLES * DT - subpath_size * PATH_DT;
@@ -1206,7 +1240,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
 
       It's interesting to see what are they used.
  #+NAME:determine-ego-car-parameters-construct-vehicle-object
- #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+ #+BEGIN_SRC C++ :noweb tange
   // **************** DETERMINE EGO CAR PARAMETERS AND CONSTRUCT VEHICLE OBJECT ******************
   // Vehicle class requires s,s_d,s_dd,d,d_d,d_dd - in that order
   double pos_s, s_dot, s_ddot;
@@ -1349,7 +1383,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
     The interpolation logic:
     for interpolated_waypoints_s, just starting from the beginning s, with dist_inc increment:
     #+NAME:
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    #+BEGIN_SRC C++ :noweb tange
       interpolated_waypoints_s.push_back(coarse_waypoints_s[0]);
       for (int i = 1; i < num_interpolation_points; i++) {
         interpolated_waypoints_s.push_back(coarse_waypoints_s[0] + i * dist_inc);
@@ -1367,7 +1401,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
 
     Here is the code of interpolate_points
     #+NAME:interpolate_points_function_def
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    #+BEGIN_SRC C++ :noweb tange
       vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
                                         double interval, int output_size) {
         // uses the spline library to interpolate points connecting a series of x and y values
@@ -1392,7 +1426,7 @@ predictions[v_id].second[i][0] is s, predictions[v_id].second[i][d], where from 
     where x are evenly spaced by dist_inc, and y = s(x)
 
 #+NAME:interpolate_points
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // interpolation parameters
   double dist_inc = 0.5;
   int num_interpolation_points = (coarse_waypoints_s[coarse_waypoints_s.size()-1] - coarse_waypoints_s[0]) / dist_inc;
@@ -1485,7 +1519,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
     #define TRACK_LENGTH 6945.554           // meters
     It seems calibrating the inaccuracy:
     #+NAME:calibrating
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    #+BEGIN_SRC C++ :noweb tange
       if (i < 0 // this neighbor point (current_s) should closer to the point 0 than base_s,
           // i.e. it should be base_s <= current_s
           &&
@@ -1508,7 +1542,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
     For coarse_waypoints_{x, y, dx, dy} no change, but put them in for the consistent order.
 
 #+NAME:prepare-coarse_waypoints
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // ********************* CONSTRUCT INTERPOLATED WAYPOINTS OF NEARBY AREA **********************
   int num_waypoints = map_waypoints_x.size();
   int next_waypoint_index = NextWaypoint(car_x, car_y, car_yaw, map_waypoints_x, map_waypoints_y);
@@ -1568,7 +1602,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
 *** get-telemetry-data
    The code is self-explanatory. But this is the source of data from simulator, the only live data source.
 #+NAME:get-telemetry-data
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // j[1] is the data JSON object
             // Main car's localization Data
             double car_x = j[1]["x"];
@@ -1602,7 +1636,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
 
 
 #+NAME:read-waypoints
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   uWS::Hub h;
 
     // Load up map values for waypoint's x,y,s and d normalized normal vectors
@@ -1679,7 +1713,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
 
 
 #+NAME:getXY
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // Transform from Frenet s,d coordinates to Cartesian x,y
   vector<double> getXY(double s, double d,
                        vector<double> maps_s, vector<double> maps_x, vector<double> maps_y)
@@ -1715,7 +1749,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
 
     The computation of frenet_d
 #+NAME:getFrenet
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
   // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
   vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y, vector<double> maps_s)
   {
@@ -1757,7 +1791,7 @@ coarse_waypoints are used in interpolation. It's extracted from waypoints_map ne
 
 *** NextWaypoint
 #+NAME:NextWaypoint
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
 int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
 {
 	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
@@ -1775,7 +1809,7 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
 
 *** ClosestWaypoint
 #+NAME:ClosestWaypoint
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tange
 int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)
 {
 	double closestLen = 100000; //large number
@@ -1800,7 +1834,7 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
 
 *** preamble
 #+NAME:preamble
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none 
+#+BEGIN_SRC C++ :noweb tange
   #include <fstream>
   #include <math.h>
   #include <uWS/uWS.h>
@@ -1849,6 +1883,10 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
 
 #+END_SRC
 
+* Questions
+
+  1. How is the trajectories of the choices of maneuver are represented, and used? I don't remember how they are represented and used.
+
 * Lessons
 ** Lessons: Seems a good idea to read code top-down
 
@@ -1865,6 +1903,8 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
    This will help to drive through when facing obstacles.
 
 * Next: game plan:
+  - Need to learn how he compute the target_v in the decision.
+  1. May want to use the previous (remaining) trajectory to calculate the speed and acceleration that the car will be when those trajectory are applied.
   2. DONE: re-study his README for high level design idea
   1. understand how NextWaypoint, and getFrenet work?
   3. DONE: Sketch my understand of his high level design, especially data flow, reverse from next_{x, y}_vals upto simulator input, and map_waypoints, etc.
