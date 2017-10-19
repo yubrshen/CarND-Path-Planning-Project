@@ -344,9 +344,9 @@ KINEMATIC_DATA kinematic_required_in_front
   if (gap_front < SAFE_DISTANCE) {
     kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
   }
-  if (data_lanes.car_crashing_front_or_behind) {
-    kinematic.v = 0.0;
-  }
+  // if (data_lanes.car_crashing_front_or_behind) {
+  //   kinematic.v = 0.0;
+  // }
   kinematic.a = (kinematic.v - my_car.v)/kinematic.horizon;
   return kinematic;
 }
