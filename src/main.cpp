@@ -1396,9 +1396,14 @@ int main() {
             double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
             double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
 
-            cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-                 << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d
+                 << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+                 << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
                  << endl;
+
+            // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+            //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            //      << endl;
 
             // Sensor Fusion Data, a list of all other cars on the same side of the road.
             auto sensor_fusion = j[1]["sensor_fusion"];
@@ -1431,20 +1436,20 @@ int main() {
             // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
             // the vector assginment.
             cout << endl;
-            cout << "remaining x: ";
+            // cout << "remaining x: ";
             for (auto x:remaining_path_x) {
               remaining_trajectory.x_vals.push_back(x);
-              cout << setw(6) << x << ", ";
+              // cout << setw(6) << x << ", ";
              }
             
-            cout << endl;
-            cout << "remaining y: ";
+            //cout << endl;
+            //cout << "remaining y: ";
             for (auto y:remaining_path_y) {
               remaining_trajectory.y_vals.push_back(y);
-              cout << setw(6) << y << ", ";
+              // cout << setw(6) << y << ", ";
              }
             
-            cout << endl;
+            // cout << endl;
             
             // remaining_trajectory.x_vals = remaining_path_x;
             // remaining_trajectory.y_vals = remaining_path_y;
@@ -1462,18 +1467,18 @@ int main() {
             // vector<double> next_x_vals;
             // vector<double> next_y_vals;
 
-            cout << endl;
-            cout << "planned traj. sent to simulator" << endl;
-            cout << "x: ";
-            for (auto x:trajectory.x_vals) {
-              cout << setw(6) << x << ", ";
-            }
-            cout << endl;
-            cout << "y: ";
-            for (auto y:trajectory.y_vals) {
-              cout << setw(6) << y << ", ";
-            }
-            cout << endl;
+            // cout << endl;
+            // cout << "planned traj. sent to simulator" << endl;
+            // cout << "x: ";
+            // for (auto x:trajectory.x_vals) {
+            //   cout << setw(6) << x << ", ";
+            // }
+            // cout << endl;
+            // cout << "y: ";
+            // for (auto y:trajectory.y_vals) {
+            //   cout << setw(6) << y << ", ";
+            // }
+            // cout << endl;
 
             json msgJson;
             msgJson["next_x"] = trajectory.x_vals;
