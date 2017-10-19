@@ -542,11 +542,11 @@ double lane_change_extra_cost_f(Decision decision) {
 }
 double calculate_cost(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   // cout << " lane: " << decision.lane_index_changed_to;
-  double collision_cost         = COLLISION_C*collision_cost_f(decision, my_car, data_lanes);
-  double inefficiency_cost      = EFFICIENCY_C*inefficiency_cost_f(decision, my_car, data_lanes);
-  double buffer_cost            = DANGER_C*buffer_cost_f(decision, my_car, data_lanes);
-  double not_middle_cost        = NOT_MIDDLE_C*not_middle_cost_f(decision, my_car, data_lanes);
-  double lane_change_extra_cost = LANE_CHANGE_C*lane_change_extra_cost_f(decision);
+  double collision_cost         = COLLISION_C *   collision_cost_f(decision, my_car, data_lanes);
+  double inefficiency_cost      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
+  double buffer_cost            = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
+  double not_middle_cost        = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
+  double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(decision);
   double cost
     = collision_cost + buffer_cost + inefficiency_cost + not_middle_cost + lane_change_extra_cost;
   cout << "coll. c: " << setw(3) << collision_cost << " buf. c: " << setw(3) << buffer_cost

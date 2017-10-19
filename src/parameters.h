@@ -42,7 +42,7 @@ const double EFFICIENCY_C = .1E3f;
 const double NOT_MIDDLE_C = .1E1f;
 const double LANE_CHANGE_C= .1E2f;
 const double NEAR_ZERO = .1E-1f;
-const double DESIRED_TIME_BUFFER = 30; // seconds, according to http://copradar.com/redlight/factors/
+const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
 const double SAFE_DISTANCE = .5E2f; // huge number for indefinite futrue time
 
 #endif
