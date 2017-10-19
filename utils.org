@@ -87,19 +87,21 @@ This header file contains implementations.
     return closestWaypoint;
   }
 
-  int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
-  {
-    int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-    double map_x = maps_x[closestWaypoint];
-    double map_y = maps_y[closestWaypoint];
-    double heading = atan2( (map_y-y),(map_x-x) );
-    double angle = abs(theta-heading);
-    if(angle > pi()/4)
-    {
-      closestWaypoint++;
-    }
-    return closestWaypoint;
-  }
+  <<next-waypoint>>
+
+    // int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
+    // {
+    //   int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
+    //   double map_x = maps_x[closestWaypoint];
+    //   double map_y = maps_y[closestWaypoint];
+    //   double heading = atan2( (map_y-y),(map_x-x) );
+    //   double angle = abs(theta-heading);
+    //   if(angle > pi()/4)
+    //   {
+    //     closestWaypoint++;
+    //   }
+    //   return closestWaypoint;
+    // }
 
   // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
   vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y, vector<double> maps_s)
@@ -360,4 +362,52 @@ string hasData(string s) {
   }
   return "";
 }
+#+END_SRC
+* NextWaypoint (old, suggested to have bug)
+
+#+NAME:old-next-waypoint
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
+  {
+    int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
+    double map_x = maps_x[closestWaypoint];
+    double map_y = maps_y[closestWaypoint];
+    double heading = atan2( (map_y-y),(map_x-x) );
+    double angle = abs(theta-heading);
+    if(angle > pi()/4)
+    {
+      closestWaypoint++;
+    }
+    return closestWaypoint;
+  }
+#+END_SRC
+
+* NextWaypoint (new, correction from forum)
+
+  Based on https://discussions.udacity.com/t/2-bugs-in-code-provided-in-nextwaypoint/397364
+
+#+NAME:next-waypoint
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  //int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
+  int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
+  {
+    int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
+    double map_x = maps_x[closestWaypoint];
+    double map_y = maps_y[closestWaypoint];
+
+    double heading = atan2( (map_y-y),(map_x-x) );
+
+    double angle = abs(theta - heading);
+    angle = min(2*pi() - angle, angle); // XXX bug fix
+
+    if(angle > pi()/4) {
+        closestWaypoint++;
+        if (closestWaypoint == maps_x.size()) {
+            closestWaypoint = 0; // XXX bug fix
+          }
+      }
+    // XXX debug
+    // cout << "corrected closestWaypoint=" << closestWaypoint << endl;
+    return closestWaypoint;
+  }
 #+END_SRC

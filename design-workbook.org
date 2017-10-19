@@ -1174,7 +1174,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
 
     // last two points of coarse trajectory, use target_d and current s + 30,60
     double target_s1 = start_s + 30;
-    double target_d1 = decision.lane_index_changed_to;
+    double target_d1 = lane_center_d(decision.lane_index_changed_to);
     vector<double> target_xy1 = getXY(target_s1, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
     double target_x1 = target_xy1[0];
     double target_y1 = target_xy1[1];
