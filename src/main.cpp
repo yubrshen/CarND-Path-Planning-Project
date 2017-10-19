@@ -844,6 +844,8 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
   // next s values
   double target_v = decision.projected_kinematics.v; // best_target[0][1];
   double next_s = start_s;
+  double prev_updated_s = -MAX_S; // impossibly small
+
   double next_v = start_v;
   // double next_a = s_ddot;
   const double VELOCITY_INCREMENT_LIMIT = 0.125;
@@ -857,6 +859,12 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     }
     next_v += v_incr;
     next_s += next_v * UPDATE_INTERVAL;
+    // prevent non-increasing s values:
+    next_s = wrap_around(next_s);
+    if (next_s <= prev_updated_s)
+      break;
+    prev_updated_s = next_s;
+
     interpolated_s_traj.push_back(next_s);
   }
 
