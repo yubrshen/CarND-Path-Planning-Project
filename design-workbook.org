@@ -190,8 +190,8 @@ The vx, vy values can be useful for predicting where the cars will be in the fut
   const double COLLISION_C  = .1E6f;
   const double DANGER_C     = .1E5f;
   const double EFFICIENCY_C = .1E3f;
-  const double NOT_MIDDLE_C = .1E2f;
-  const double LANE_CHANGE_C= 0.0; // .1E2f;
+  const double NOT_MIDDLE_C = .1E1f;
+  const double LANE_CHANGE_C= .1E2f;
   const double NEAR_ZERO = .1E-1f;
   const double DESIRED_TIME_BUFFER = 30; // seconds, according to http://copradar.com/redlight/factors/
   const double SAFE_DISTANCE = .5E2f; // huge number for indefinite futrue time
@@ -666,11 +666,11 @@ Compute the decision should the maneuver is performed.
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
   double calculate_cost(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
     // cout << " lane: " << decision.lane_index_changed_to;
-    double collision_cost         = COLLISION_C*collision_cost_f(decision, my_car, data_lanes);
-    double inefficiency_cost      = EFFICIENCY_C*inefficiency_cost_f(decision, my_car, data_lanes);
-    double buffer_cost            = DANGER_C*buffer_cost_f(decision, my_car, data_lanes);
-    double not_middle_cost        = NOT_MIDDLE_C*not_middle_cost_f(decision, my_car, data_lanes);
-    double lane_change_extra_cost = LANE_CHANGE_C*lane_change_extra_cost_f(decision);
+    double collision_cost         = COLLISION_C *   collision_cost_f(decision, my_car, data_lanes);
+    double inefficiency_cost      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
+    double buffer_cost            = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
+    double not_middle_cost        = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
+    double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(decision);
     double cost
       = collision_cost + buffer_cost + inefficiency_cost + not_middle_cost + lane_change_extra_cost;
     cout << "coll. c: " << setw(3) << collision_cost << " buf. c: " << setw(3) << buffer_cost
@@ -1028,10 +1028,10 @@ Here is the core of the path plan, computing a series of x, y values for the sim
   cout.precision(5);
 
   TRAJECTORY remaining_trajectory;
-  cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
+  // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
   // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
   // the vector assginment.
-  cout << endl;
+  // cout << endl;
   // cout << "remaining x: ";
   for (auto x:remaining_path_x) {
     remaining_trajectory.x_vals.push_back(x);
@@ -1855,10 +1855,11 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
               double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
               double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
 
-              cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d
-                   << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-                   << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-                   << endl;
+              cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
+
+              // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+              // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+              // << endl;
 
               // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
               //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
