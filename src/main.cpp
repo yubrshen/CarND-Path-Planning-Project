@@ -467,9 +467,9 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
   if ((SAFE_DISTANCE <= gap_front_0) &&
       (SAFE_DISTANCE <= gap_behind_0)) {
     // for the case, when there is no car in front or behind
+    // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
     return 0;
   }
-
   if (gap_front_0  < BUFFER_ZONE ||
       gap_behind_0 < BUFFER_ZONE) {
     cout << " too close, ";

@@ -194,7 +194,7 @@ The vx, vy values can be useful for predicting where the cars will be in the fut
   const double LANE_CHANGE_C= .1E2f;
   const double NEAR_ZERO = .1E-1f;
   const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
-  const double SAFE_DISTANCE = .5E2f; // huge number for indefinite futrue time
+  const double SAFE_DISTANCE = 100.0; // meters, huge number for indefinite futrue time
 
   #endif
 #+END_SRC
@@ -729,9 +729,9 @@ Compute the decision should the maneuver is performed.
     if ((SAFE_DISTANCE <= gap_front_0) &&
         (SAFE_DISTANCE <= gap_behind_0)) {
       // for the case, when there is no car in front or behind
+      // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
       return 0;
     }
-
     if (gap_front_0  < BUFFER_ZONE ||
         gap_behind_0 < BUFFER_ZONE) {
       cout << " too close, ";
