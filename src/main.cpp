@@ -104,8 +104,8 @@ struct CarDescription {
   double x;
   double y;
   double yaw;
-  double vx;
-  double vy;
+  double v_x;
+  double v_y;
   double s;
   double d;
   double v;
@@ -160,27 +160,47 @@ double projected_gap_behind(double behind_s, double behind_v,
     + 0.5*front_a*(delta_t*delta_t) - VEHICLE_LENGTH;
   return gap;
 }
+double start_distance_congestion(double dist_start// , double start_time
+                                 )
+{
+  return exp(-max(dist_start, 0.0) );
+  // * ((start_time == 0) ? 1 : start_time)
+}
+
+double threshold_congestion(double time_threshold, double start_time)
+{
+  double damper = start_distance_congestion(SAFE_DISTANCE)/exp(-start_time);
+  // adjust the congestion for this case, to be comparable with that computed by start_distance_congestion
+  // if time_threshold == start_time, then the congestion would be equal to start_distance_congestion(SAFE_DISTANCE)
+  double c = damper * exp(-time_threshold // * SAFE_DISTANCE
+                   );
+  return c;
+}
+
 double congestion_f(CarDescription front, CarDescription behind, double start_time, double end_time)
 { // returns the congestion coefficient between the two cars.
   // To simplify, assume they have zero acceleration
-
   double c = 0.0;
   double dist_start = (front.s - behind.s) + (front.v - behind.v)*start_time;
   if (behind.v <= front.v)
     {
-      c = exp(-max(dist_start, 0.0)*start_time);
+      c = start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
+      cout << " start_time: " << setw(5) << start_time << ", front faster, dist_start: " << setw(7) << dist_start << " c: " << setw(7) << c << "; ";
     } else
     { // behind.v > front.v
       if (dist_start <= SAFE_DISTANCE)
         {
-          c = exp(-max(dist_start, 0.0) * start_time);
+          c = start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
+          cout <<  " start_time: " << setw(5) << start_time <<", front slower and start with less safe distance, dist_start: " << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
         } else
         { // dist_start > SAFE_DISTANCE
           // with equation:
           // dist = (front.s - behind.s) + (front.v - behind.v)* t = SAFE_DISTANCE
           double time_threshold = (SAFE_DISTANCE - (front.s - behind.s)) / (front.v - behind.v);
+          cout << "front slower, and start wtih more than safe distance, time_threshold: " << setw(7) << time_threshold << " c: " << setw(7) << c <<"; ";
+
           assert(start_time <= time_threshold); // by the model's reasoning
-          c = exp(-time_threshold * SAFE_DISTANCE);
+          c = threshold_congestion(time_threshold, start_time);
         }
     }
   return c;
@@ -259,12 +279,12 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     a_car.id = data[0];
     a_car.x  = data[1];
     a_car.y  = data[2];
-    a_car.vx = data[3];
-    a_car.vy = data[4];
+    a_car.v_x = data[3];
+    a_car.v_y = data[4];
     a_car.s  = data[5];
 
     a_car.lane_index = d_to_lane_index(a_car.d);
-    a_car.v = sqrt(a_car.x*a_car.x + a_car.y*a_car.y);
+    a_car.v = sqrt(pow(a_car.v_x, 2) + pow(a_car.v_y, 2));
     a_car.empty = false;
 
     // cout << "a car at lane: " << a_car.lane_index;
@@ -289,10 +309,12 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
   // For only the legal lanes adjacent to my_car.lane_index,
   int left_lane  = my_car.lane_index -1;
   int right_lane = my_car.lane_index +1;
+  // cout << "candidates_{left | right}_lane: " << left_lane << " | " << right_lane << "; ";
   vector<int> lanes_interested = {my_car.lane_index};
   if (0 <= left_lane)         lanes_interested.push_back(left_lane);
   if (right_lane < NUM_LANES) lanes_interested.push_back(right_lane);
   for (auto lane:lanes_interested) {
+    cout << "interested lane: " << lane << "; ";
     if (!data_lanes.lanes[lane].nearest_back.empty)
       {
         double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
@@ -678,11 +700,11 @@ Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
 // for (size_t i = 0; i < sensor_fusion.size(); i++) {
 //   // car in in my lane
 //   float d = sensor_fusion[i][6];
-//   // the format of sensor_fusion data: vector of vector of id, x, y, vx, vy, s, d
+//   // the format of sensor_fusion data: vector of vector of id, x, y, v_x, v_y, s, d
 //   if (within_lane(lane_index, d)) {
-//     double vx = sensor_fusion[i][3];
-//     double vy = sensor_fusion[i][4];
-//     double another_car_speed = sqrt(vx*vx + vy*vy);
+//     double v_x = sensor_fusion[i][3];
+//     double v_y = sensor_fusion[i][4];
+//     double another_car_speed = sqrt(v_x*v_x + v_y*v_y);
 //     double another_car_projected_s =
 //       (double)sensor_fusion[i][5] + ((double)remaining_path_adopted_size*UPDATE_INTERVAL*another_car_speed);
 //     // the position of the other car in the slight future
