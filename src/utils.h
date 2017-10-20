@@ -43,6 +43,12 @@
     return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
   }
 
+  double logistic(double x) {
+    // returns a value between 0 and 1 for x in the range[0, infinity] and
+    // - 1 to 0 for x in the range[-infinity, infinity].
+    // Useful for cost functions.
+    return 2.0 / (1 + exp(-x)) - 1.0;
+    }
   int lane_width = 4;
   // starting from 0, from the left most to the right most
   int lane_center_d(int lane_index) {

@@ -16,9 +16,11 @@ const double SPEED_LIMIT = mph_2_meterps(49.0); // mph the top speed allowed
 const int NUM_LANES = 3;
 // The max s value before wrapping around the track back to 0
 const double MAX_S = 6945.554;
+
 const double VEHICLE_LENGTH = 3.0; // meters, 23 meters is the maximum vehicle length, according to California highway standard
-const double BUFFER_ZONE = 10*VEHICLE_LENGTH;
+// const double BUFFER_ZONE = 10*VEHICLE_LENGTH;
 const double NEARBY = 1*VEHICLE_LENGTH; // metres, very near to my_car
+
 const double UPDATE_INTERVAL = 0.02; // seconds, the interval to update maneuver decision
 
 const int PLANNED_TRAJECTORY_LENGTH = 50; // 3; // the length of the planned trajectory fed to the simulator
@@ -26,6 +28,7 @@ const int PLANNED_TRAJECTORY_LENGTH = 50; // 3; // the length of the planned tra
 const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 25; // 3, 30;
 // the length of the first portion of the remaining trajectory (previous_path)
 // from experiment, it seems 25 might be too few when the CPU is busy.
+
 const double VELOCITY_INCREMENT_LIMIT = 0.125;
 
 const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2

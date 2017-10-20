@@ -787,6 +787,17 @@ first compute as if there is no car in front,
      #+END_SRC
 
 ***** collision_cost
+      Compute the projected distances of the nearest vehicle during a time period controlled by a parameters, and find the
+      closest distance, judge if it's too close.
+
+      The evaluation period starts at the time of new trajectory, when the remaining trajectory would have been used up.
+
+      (For my own implementation, I can reason by comparing the speeds of the closest vehicle with that of Ego.
+      If the other vehicle is faster, then the current distance would be the smallest.
+      But if the other vehicle is slower, then the distance will decrease over time, need to project at the time when the new trajectory would be needed.
+
+      )
+
       Very straight forward relying on nearest_approach_to_any_vehicle, if it's too close, then return 1 else 0.
       #define VEHICLE_RADIUS 1.25              // meters
 
@@ -846,6 +857,10 @@ first compute as if there is no car in front,
       This may have some overlapping with collision cost, but they have very different coefficients.
 
 #+NAME:buffer_cost
+
+Also very straight as long as one find the projected smallest distance to Ego. It's also a function of
+the nearest, like collision_cost.
+
 #+BEGIN_SRC C++ :noweb tange
   double logistic(double x){
     // A function that returns a value between 0 and 1 for x in the range[0, infinity] and - 1 to 1 for x in
@@ -860,6 +875,8 @@ first compute as if there is no car in front,
 #+END_SRC
 
 ***** in_lane_buffer_cost
+
+Similar to buffer_cost, but just consider the vehicle in the same lane.
 
       #+NAME:in_lane_buffer_cost
       #+BEGIN_SRC C++ :noweb tange
