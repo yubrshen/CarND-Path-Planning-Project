@@ -184,13 +184,17 @@ void update_surronding(CarDescription my_car, double s_diff, int lane, DATA_LANE
   }
 }
 
+// Try to avoid division, but use similar logic, to simplify the model
+// To work out,
+
+// The following should change to buffer_coefficient_f
+
 double shortest_distance(CarDescription front, CarDescription behind, double start_time, double end_time)
 { // compute the shortest distance between the car in front and the behind from start_time to end_time.
-
-  // To simplify, assume the have zero acceleration
+  // To simplify, assume they have zero acceleration
   double dist;
   if (front.v <= behind.v)
-    {// the shortest distance would be at the end_time
+    {// the shortest distance would be at the end_time, with the distance will decrease from the start_time to end_time
       dist = (front.s - behind.s) + (front.v - behind.v)*end_time;
     } else
     { // the shortest would be at the start_time
@@ -608,15 +612,17 @@ Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
   }
   // starting from 0, from the left most to the right most
   if (0 < my_car.lane_index) {// change to left lane possible
-    if (!data_lanes.car_to_left) {
       states.push_back(LCL);
-    }
+    // if (!data_lanes.car_to_left) {
+    //   states.push_back(LCL);
+    // }
     //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-    if (!data_lanes.car_to_right) {
       states.push_back(LCR);
-    }
+    // if (!data_lanes.car_to_right) {
+    //   states.push_back(LCR);
+    // }
     //states.push_back(PLCR); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   map<MANEUVER_STATE, Decision> decisions;
@@ -1346,7 +1352,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
 //     //   update_count += 1;
 //     //   ofstream log;
 //     //   log.open("trajactory_xys.csv");
-//     //   log << "x,y,s" << endl;
+//     //   log << "x,y,s" << endl ;
 //     //   for (int i = 0; i < new_traj_size; i++) {
 //     //     log << volocity_spaced_x_traj[i] << ", " << volocity_spaced_y_traj[i] <<
 //     //       ", " << velocity_spaced_s_traj[i] << endl;
