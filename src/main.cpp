@@ -121,8 +121,10 @@ struct LaneData {
   CarDescription nearest_front;
   CarDescription nearest_back;
   // double         car_density_front;
-  double gap_front; // the projected smallest distance with the car in front
-  double gap_behind; // the projected smallest distance with the car behind
+  double gap_front; // the projected smallest distance with the car in front, depreciated
+  double gap_behind; // the projected smallest distance with the car behind, depreciated
+  double congestion_front;      // the congestion with the car in front
+  double congestion_behind;     // the congestion with the car behind
 };
 
 struct DATA_LANES {
@@ -158,16 +160,42 @@ double projected_gap_behind(double behind_s, double behind_v,
     + 0.5*front_a*(delta_t*delta_t) - VEHICLE_LENGTH;
   return gap;
 }
-void update_surronding(CarDescription my_car, double s_diff, int lane, DATA_LANES *data_lanes) {
+double congestion_f(CarDescription front, CarDescription behind, double start_time, double end_time)
+{ // returns the congestion coefficient between the two cars.
+  // To simplify, assume they have zero acceleration
+
+  double c = 0.0;
+  double dist_start = (front.s - behind.s) + (front.v - behind.v)*start_time;
+  if (behind.v <= front.v)
+    {
+      c = exp(-max(dist_start, 0.0)*start_time);
+    } else
+    { // behind.v > front.v
+      if (dist_start <= SAFE_DISTANCE)
+        {
+          c = exp(-max(dist_start, 0.0) * start_time);
+        } else
+        { // dist_start > SAFE_DISTANCE
+          // with equation:
+          // dist = (front.s - behind.s) + (front.v - behind.v)* t = SAFE_DISTANCE
+          double time_threshold = (SAFE_DISTANCE - (front.s - behind.s)) / (front.v - behind.v);
+          assert(start_time <= time_threshold); // by the model's reasoning
+          c = exp(-time_threshold * SAFE_DISTANCE);
+        }
+    }
+  return c;
+}
+void update_surronding(CarDescription my_car, double congestion, int lane, DATA_LANES *data_lanes) {
   /*
-    Based on the distance between the car in front, and that behind, s_diff to determine the car's
+    Based on the distance between the car in front, and that behind, congestion to determine the car's
     status, represented in the fields of DATA_LANES: car_crashing_front_or_behind, car_to_left, car_to_right.
    */
 
   data_lanes-> car_crashing_front_or_behind = false;
   data_lanes-> car_to_left    = false;
   data_lanes-> car_to_right   = false;
-  if ((0 <= s_diff) && (s_diff < NEARBY)) {
+  if (congestion == 1) // ((0 <= congestion) && (congestion < NEARBY))
+    {
     switch (my_car.lane_index - lane) {
     case 0:
       data_lanes->car_crashing_front_or_behind = true;
@@ -216,6 +244,8 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     data_lanes.lanes[i].nearest_front.empty = true;
     data_lanes.lanes[i].gap_front  = SAFE_DISTANCE;
     data_lanes.lanes[i].gap_behind = SAFE_DISTANCE;
+    data_lanes.lanes[i].congestion_front  = 0.0;
+    data_lanes.lanes[i].congestion_behind = 0.0;
   }
 
   CarDescription a_car;
@@ -265,17 +295,19 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
   for (auto lane:lanes_interested) {
     if (!data_lanes.lanes[lane].nearest_back.empty)
       {
-        double s_diff = shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
+        double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
+          // shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
         // my_car.s - data_lanes.lanes[lane].nearest_back.s;
-        data_lanes.lanes[lane].gap_behind = s_diff;
-      update_surronding(my_car, s_diff, lane, &data_lanes);
+        data_lanes.lanes[lane].congestion_behind = congestion;
+        update_surronding(my_car, congestion, lane, &data_lanes);
     }
     if (!data_lanes.lanes[lane].nearest_front.empty)
       {
-        double s_diff = shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
+        double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
+          // shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
         // data_lanes.lanes[lane].nearest_front.s - my_car.s;
-        data_lanes.lanes[lane].gap_front = s_diff;
-      update_surronding(my_car, s_diff, lane, &data_lanes);
+        data_lanes.lanes[lane].congestion_front = congestion;
+        update_surronding(my_car, congestion, lane, &data_lanes);
     }
   }
   return data_lanes;
@@ -557,17 +589,19 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   // larger or equal to SAFE_DISTANCE.
 
   // assume gap_front and gap_behind are non-negative
-  double cost_front = 0;
-  if (data_lanes.lanes[my_car.lane_index].gap_front < SAFE_DISTANCE)
-    {
-    cost_front = exp(-data_lanes.lanes[my_car.lane_index].gap_front);
-  }
-  double cost_behind = 0;
-  if (data_lanes.lanes[my_car.lane_index].gap_behind < SAFE_DISTANCE)
-    {
-      cost_behind = exp(-data_lanes.lanes[my_car.lane_index].gap_behind);
-    }
-  return cost_front + cost_behind; // might want to consider if the gap_front should have bigger weight.
+  // double cost_front = 0;
+  // if (data_lanes.lanes[my_car.lane_index].gap_front < SAFE_DISTANCE)
+  //   {
+  //   cost_front = exp(-data_lanes.lanes[my_car.lane_index].gap_front);
+  //   }
+  // double cost_behind = 0;
+  // if (data_lanes.lanes[my_car.lane_index].gap_behind < SAFE_DISTANCE)
+  //   {
+  //     cost_behind = exp(-data_lanes.lanes[my_car.lane_index].gap_behind);
+  //   }
+  double cost_front  = data_lanes.lanes[my_car.lane_index].congestion_front;
+  double cost_behind = data_lanes.lanes[my_car.lane_index].congestion_behind;
+  return cost_front; // + cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
