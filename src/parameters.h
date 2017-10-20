@@ -40,7 +40,7 @@ const double MAX_JERK_METERS_PER_SECOND_CUBIC = 10; // meter/s^3
 const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
 = MAX_JERK_METERS_PER_SECOND_CUBIC * UPDATE_INTERVAL;
 const double COLLISION_C  = .1E6f;
-const double DANGER_C     = .1E5f;
+const double DANGER_C     = .1E7f;
 const double EFFICIENCY_C = .1E3f;
 const double NOT_MIDDLE_C = .1E1f;
 const double LANE_CHANGE_C= .1E2f;

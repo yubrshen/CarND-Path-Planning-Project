@@ -212,8 +212,8 @@ void update_surronding(CarDescription my_car, double congestion, int lane, DATA_
    */
 
   data_lanes-> car_crashing_front_or_behind = false;
-  data_lanes-> car_to_left    = false;
-  data_lanes-> car_to_right   = false;
+  data_lanes-> car_to_left                  = false;
+  data_lanes-> car_to_right                 = false;
   if (congestion == 1) // ((0 <= congestion) && (congestion < NEARBY))
     {
     switch (my_car.lane_index - lane) {
@@ -266,7 +266,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     data_lanes.lanes[i].gap_behind = SAFE_DISTANCE;
     data_lanes.lanes[i].congestion_front  = 0.0;
     data_lanes.lanes[i].congestion_behind = 0.0;
-  }
+    }
 
   CarDescription a_car;
   for (auto data:sensor_fusion)
@@ -275,7 +275,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     if ((a_car.d < 0) || (lane_width*NUM_LANES < a_car.d))
       {
       continue;
-    }
+      }
     a_car.id = data[0];
     a_car.x  = data[1];
     a_car.y  = data[2];
@@ -322,7 +322,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
         // my_car.s - data_lanes.lanes[lane].nearest_back.s;
         data_lanes.lanes[lane].congestion_behind = congestion;
         update_surronding(my_car, congestion, lane, &data_lanes);
-    }
+      }
     if (!data_lanes.lanes[lane].nearest_front.empty)
       {
         double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
@@ -330,7 +330,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
         // data_lanes.lanes[lane].nearest_front.s - my_car.s;
         data_lanes.lanes[lane].congestion_front = congestion;
         update_surronding(my_car, congestion, lane, &data_lanes);
-    }
+      }
   }
   return data_lanes;
 }
@@ -506,7 +506,7 @@ Decision project_maneuver(MANEUVER_STATE proposed_state, CarDescription my_car, 
   };
   decision.maneuver = proposed_state;
   cout // <<  "prop. man.: "
-       << state_str(decision.maneuver) << ", " << " lane to: " << decision.lane_index_changed_to << ", ";
+       << setw(5) << state_str(decision.maneuver) << ", " << " to: " << decision.lane_index_changed_to << ", ";
   return decision;              // this decision's state needs to be evaluated
 }
 
@@ -557,7 +557,7 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
     } else
     {
       return 0.0;
-  }
+    }
   // if ((SAFE_DISTANCE <= gap_front_0) &&
   //     (SAFE_DISTANCE <= gap_behind_0)) {
   //   // for the case, when there is no car in front or behind
@@ -668,14 +668,14 @@ Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
   }
   // starting from 0, from the left most to the right most
   if (0 < my_car.lane_index) {// change to left lane possible
-      states.push_back(LCL);
+    states.push_back(LCL);
     // if (!data_lanes.car_to_left) {
     //   states.push_back(LCL);
     // }
     //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-      states.push_back(LCR);
+    states.push_back(LCR);
     // if (!data_lanes.car_to_right) {
     //   states.push_back(LCR);
     // }
@@ -684,7 +684,7 @@ Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
   map<MANEUVER_STATE, Decision> decisions;
   for (auto proposed_state:states) {
     Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-    cout << state_str(proposed_state) << ", cost: " << setw(5) <<  a_decision.cost << " | ";
+    cout << setw(5) << state_str(proposed_state) << ", cost: " << setw(5) <<  a_decision.cost << " | ";
     decisions[proposed_state] = a_decision;
   }
 
@@ -692,7 +692,7 @@ Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
   // if ((decision.maneuver != KL) && decisions[KL].cost == decisions[decision.maneuver].cost) {
   //   decision = decisions[KL];
   // }
-  cout << "Sel. man.: "  << state_str(decision.maneuver); // << ", cost: " << setw(7) << decision.cost << " ";
+  cout << "Sel. man.: "  << setw(5) << state_str(decision.maneuver); // << ", cost: " << setw(7) << decision.cost << " ";
   cout << endl; // end of displaying cost evaluations
   return decision;
 }

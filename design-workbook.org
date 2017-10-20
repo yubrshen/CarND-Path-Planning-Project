@@ -191,7 +191,7 @@ The v_x, v_y values can be useful for predicting where the cars will be in the f
   const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
   = MAX_JERK_METERS_PER_SECOND_CUBIC * UPDATE_INTERVAL;
   const double COLLISION_C  = .1E6f;
-  const double DANGER_C     = .1E5f;
+  const double DANGER_C     = .1E7f;
   const double EFFICIENCY_C = .1E3f;
   const double NOT_MIDDLE_C = .1E1f;
   const double LANE_CHANGE_C= .1E2f;
@@ -624,7 +624,7 @@ Compute the decision should the maneuver is performed.
     };
     decision.maneuver = proposed_state;
     cout // <<  "prop. man.: "
-         << state_str(decision.maneuver) << ", " << " lane to: " << decision.lane_index_changed_to << ", ";
+         << setw(5) << state_str(decision.maneuver) << ", " << " to: " << decision.lane_index_changed_to << ", ";
     return decision;              // this decision's state needs to be evaluated
   }
 #+END_SRC
@@ -1846,7 +1846,7 @@ The structure Decision represent all the consequence of a maneuver decision incl
     map<MANEUVER_STATE, Decision> decisions;
     for (auto proposed_state:states) {
       Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-      cout << state_str(proposed_state) << ", cost: " << setw(5) <<  a_decision.cost << " | ";
+      cout << setw(5) << state_str(proposed_state) << ", cost: " << setw(5) <<  a_decision.cost << " | ";
       decisions[proposed_state] = a_decision;
     }
 
@@ -1854,7 +1854,7 @@ The structure Decision represent all the consequence of a maneuver decision incl
     // if ((decision.maneuver != KL) && decisions[KL].cost == decisions[decision.maneuver].cost) {
     //   decision = decisions[KL];
     // }
-    cout << "Sel. man.: "  << state_str(decision.maneuver); // << ", cost: " << setw(7) << decision.cost << " ";
+    cout << "Sel. man.: "  << setw(5) << state_str(decision.maneuver); // << ", cost: " << setw(7) << decision.cost << " ";
     cout << endl; // end of displaying cost evaluations
     return decision;
   }
