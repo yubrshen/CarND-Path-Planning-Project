@@ -25,11 +25,11 @@ const double UPDATE_INTERVAL = 0.02; // seconds, the interval to update maneuver
 
 const int PLANNED_TRAJECTORY_LENGTH = 50; // 3; // the length of the planned trajectory fed to the simulator
 // In the current implementation, PLANNED_TRAJECTORY_LENGTH cannot be larger than 10. It might be a bug in the implementation.
-const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 25; // 3, 30;
+const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 50; // 3, 30;
 // the length of the first portion of the remaining trajectory (previous_path)
 // from experiment, it seems 25 might be too few when the CPU is busy.
 
-const double VELOCITY_INCREMENT_LIMIT = 0.125;
+const double VELOCITY_INCREMENT_LIMIT = 0.1; // 0.125;
 
 const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
 const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
