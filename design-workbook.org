@@ -194,7 +194,7 @@ The v_x, v_y values can be useful for predicting where the cars will be in the f
   const double DANGER_C     = .1E7f;
   const double EFFICIENCY_C = .1E3f;
   const double NOT_MIDDLE_C = .1E1f;
-  const double LANE_CHANGE_C= .1E2f;
+  const double LANE_CHANGE_C= .1E3f;
   const double NEAR_ZERO = .1E-1f;
   const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
   const double SAFE_DISTANCE = 90.0; // meters, huge number for indefinite futrue time
@@ -802,7 +802,7 @@ Compute the decision should the maneuver is performed.
     double inefficiency_cost      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
     double buffer_cost            = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
     double not_middle_cost        = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
-    double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(decision);
+    double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(my_car, decision);
     double cost
       = collision_cost + buffer_cost + inefficiency_cost + not_middle_cost + lane_change_extra_cost;
     cout << "coll. c: " << setw(3) << collision_cost << " buf. c: " << setw(3) << buffer_cost
@@ -981,9 +981,9 @@ The data required:
 
 #+NAME:lane_change_extra_cost_f
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  double lane_change_extra_cost_f(Decision decision) {
+  double lane_change_extra_cost_f(CarDescription my_car, Decision decision) {
     if ((decision.maneuver == LCL) || (decision.maneuver == LCR))
-      return 1;
+      return exp(-fabs(my_car.v));
     else
       return 0;
   }
