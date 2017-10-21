@@ -163,7 +163,7 @@ double projected_gap_behind(double behind_s, double behind_v,
 double start_distance_congestion(double dist_start// , double start_time
                                  )
 {
-  return exp(-max(dist_start, 0.0) );
+  return exp(-max(dist_start/SAFE_DISTANCE, 0.0) );
   // * ((start_time == 0) ? 1 : start_time)
 }
 
@@ -190,7 +190,9 @@ double congestion_f(CarDescription front, CarDescription behind, double start_ti
     { // behind.v > front.v
       if (dist_start <= SAFE_DISTANCE)
         {
-          c = start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
+          double punish_weight = 1.5; // punish further this case
+
+          c = punish_weight * start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
           cout <<  " start_time: " << setw(5) << start_time <<", front slower and start with less safe distance, dist_start: " << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
         } else
         { // dist_start > SAFE_DISTANCE
@@ -317,6 +319,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     cout << "interested lane: " << lane << "; ";
     if (!data_lanes.lanes[lane].nearest_back.empty)
       {
+        cout << " back congestion: ";
         double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
           // shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
         // my_car.s - data_lanes.lanes[lane].nearest_back.s;
@@ -325,6 +328,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
       }
     if (!data_lanes.lanes[lane].nearest_front.empty)
       {
+        cout << " front congestion: ";
         double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
           // shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
         // data_lanes.lanes[lane].nearest_front.s - my_car.s;
@@ -621,8 +625,8 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   //   {
   //     cost_behind = exp(-data_lanes.lanes[my_car.lane_index].gap_behind);
   //   }
-  double cost_front  = data_lanes.lanes[my_car.lane_index].congestion_front;
-  double cost_behind = data_lanes.lanes[my_car.lane_index].congestion_behind;
+  double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
+  double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
   return cost_front; // + cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
