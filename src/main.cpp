@@ -435,7 +435,7 @@ KINEMATIC_DATA kinematic_required_in_front
     = data_lanes.lanes[lane_changed_to].nearest_front.s
     + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
   double gap_front = projected_front_car_s - projected_my_car_s;
-  if (gap_front < SAFE_DISTANCE) {
+  if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE)) {
     kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
   }
   // if (data_lanes.car_crashing_front_or_behind) {
@@ -834,6 +834,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
 
   int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
+  cout << " new_traj_size: " << new_traj_size << "; ";
 
   double start_time = remaining_path_adopted_size * UPDATE_INTERVAL;
   double end_time   = start_time + new_traj_size  * UPDATE_INTERVAL;
@@ -842,7 +843,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
 
   Decision decision = maneuver(my_car, data_lanes);
 
-  // default values of for the start of the new trajectory, applicable when there is not enough remaining_trajectory
+  // default values for the start of the new trajectory, applicable when there is not enough remaining_trajectory
   double start_s   = my_car.s;
   double start_x   = my_car.x;
   double start_y   = my_car.y;
@@ -859,7 +860,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     double start_x2  = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
     double start_y2  = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
     double start_yaw = atan2(start_y-start_y2,
-                      start_x-start_x2);
+                             start_x-start_x2);
     vector<double> frenet = getFrenet(start_x, start_y, start_yaw, waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
     start_s = frenet[0];
     start_d = frenet[1];
@@ -954,10 +955,9 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
   double prev_updated_s = -MAX_S; // impossibly small
 
   double next_v = start_v;
-  // double next_a = s_ddot;
   const double VELOCITY_INCREMENT_LIMIT = 0.125;
   for (int i = 0; i < new_traj_size; i++) {
-    double v_incr; //, a_incr;
+    double v_incr;
     if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
       v_incr = 0;
     } else {
@@ -971,7 +971,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     if (next_s <= prev_updated_s)
       break;
     prev_updated_s = next_s;
-
+    cout << "next_s: " << setw(5) << next_s << ", ";
     interpolated_s_traj.push_back(next_s);
   }
 
@@ -993,450 +993,6 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
   }
   return trajectory;
 }
-
-/* Code junk yard
-// decision.maneuver = KL; // default
-// cout << "fr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_front.empty &&
-//                        (data_lanes.lanes[my_car.lane_index].gap_front <= 0)) << ", ";
-// cout << "rr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_back.empty &&
-//                        (data_lanes.lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
-
-// int shift_direction = 0;
-// if (decision.maneuver == LCL) {
-//   shift_direction = -1;
-//  } else if (decision.maneuver == LCR) {
-//   shift_direction = 1;
-//  } else {
-//   shift_direction = 0;
-//  }
-// double lane_gap = abs(my_car.d - lane_center_d(decision.lane_index_changed_to));
-// next_d = {my_car.d + shift_direction * lane_gap * 0.2,
-//           my_car.d + shift_direction * lane_gap * 0.3,
-//           my_car.d + shift_direction * lane_gap * 0.5
-// };
-
-// cout << ", next lane: " << decision.lane_index_changed_to;
-// cout << " prev lane: " << my_car.lane_index; // << endl;
-
---------------- old trajactory generation:
-// seeding points to generate smooth trajectory through spline
-
-    vector<double> next_d = {my_car.d, my_car.d, my_car.d}; // the d coordinates for the seeding points for spline
-    vector<double> ptsx;
-    vector<double> ptsy;
-    vector<double> ptss;
-
-    // reference x, y, yaw
-    // either we will reference the starting point as where the car is
-    // or at the end of the adopted remaining paths and points
-    double ref_x   = my_car.x;
-    double ref_y   = my_car.y;
-    double ref_s   = my_car.s;
-    cout << "from my_car.s, updating ref_s: " << ref_s << ", ";
-
-    double ref_yaw = my_car.yaw;
-    double ref_v   = my_car.v;
-
-    int remaining_path_adopted_size  =
-      min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
-    // only the first portion of the remaining_path is used in the new trajectory planning.
-    // This is a trade-off of considering continuity, and the delay in path planner in providing new
-    // trajectory.
-    // cout << ", remaining_path_adopted_size: " << remaining_path_adopted_size;
-    // cout << endl;
-
-    // For smooth path generation, replace car_s by
-    // the end of the s at the adopted remaining path
-
-    if (remaining_path_adopted_size < 2) {
-      // If the previous trajectory is almost empty,
-      // use car's current position as starting reference
-      // use two points to make the path tangent to the car
-      double prev_car_x = my_car.x - cos(my_car.yaw);
-      double prev_car_y = my_car.y - sin(my_car.yaw);
-      double prev_car_s = my_car.s - 1;
-
-      ptsx.push_back(prev_car_x);
-      ptsx.push_back(my_car.x);
-
-      ptsy.push_back(prev_car_y);
-      ptsy.push_back(my_car.y);
-
-      ptss.push_back(prev_car_s);
-      ptss.push_back(my_car.s);
-
-     } else { // use the previous path's end point as starting reference
-      // Redefine reference state by previous path and point
-      ref_x = remaining_trajectory.x_vals[remaining_path_adopted_size-1];
-      ref_y = remaining_trajectory.y_vals[remaining_path_adopted_size-1];
-
-      double ref_x_prev = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
-      double ref_y_prev = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
-      ref_yaw = atan2(ref_y - ref_y_prev, ref_x - ref_x_prev); // in radians unit
-      double prev_car_s = ref_s - my_car.v * UPDATE_INTERVAL;
-
-      // use two points to make the path tangent to the previous path's end point
-      ptsx.push_back(ref_x_prev);
-      ptsx.push_back(ref_x);
-
-      ptsy.push_back(ref_y_prev);
-      ptsy.push_back(ref_y);
-
-      ptss.push_back(prev_car_s);
-      ptss.push_back(ref_s);
-
-      // cout << "ref_x/y_prev: (" << ref_x_prev << ", " << ref_y_prev << "), ref_x/y: (" <<
-      //   ref_x << ", " << ref_y << ")" << endl;
-     }
-    // The computation of ref_v may need higher accuracy.
-
-    if (0 < remaining_path_adopted_size) { // replace car_s
-      vector<double> frenet_s_d
-        = getFrenet(remaining_trajectory.x_vals[remaining_path_adopted_size-1],
-                    remaining_trajectory.y_vals[remaining_path_adopted_size-1],
-                    ref_yaw,
-                    waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
-      ref_s = frenet_s_d[0];
-      cout << "from remaining trajectory, updating ref_s: " << ref_s << ", ";
-    }
-    if (1 < remaining_path_adopted_size) {
-      vector<double> frenet_s_d_prev
-        = getFrenet(remaining_trajectory.x_vals[remaining_path_adopted_size-2],
-                    remaining_trajectory.y_vals[remaining_path_adopted_size-2],
-                    ref_yaw,
-                    waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
-
-      double ref_s_prev = frenet_s_d_prev[0];
-      double ref_s_delta = (ref_s - ref_s_prev);
-      //ref_v = ref_s_delta/UPDATE_INTERVAL;
-      // ref_v = max(ref_v, 0.02); // estimate the minimum speed, not working,
-      // causing non-increasing s sequence, probably due to lack of resolution.
-      // cout << "ref_s: " << ref_s << ", ref_s_prev: " << ref_s_prev << ", ref_s_delta: " << ref_s_delta << ", ref_v: " << ref_v << ", ";
-     }
-    // In Frenet add evenly 30m spaced points ahead of the state reference
-    vector<double> next_wp0 = getXY(wrap_around(ref_s + 30),
-                                    lane_center_d(decision.lane_index_changed_to), //next_d[0],
-                                    waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-    vector<double> next_wp1 = getXY(wrap_around(ref_s + 60),
-                                    lane_center_d(decision.lane_index_changed_to), //next_d[1],
-                                    waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-    vector<double> next_wp2 = getXY(wrap_around(ref_s + 90),
-                                    lane_center_d(decision.lane_index_changed_to), //next_d[2],
-                                    waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-
-    ptsx.push_back(next_wp0[0]);
-    ptsx.push_back(next_wp1[0]);
-    ptsx.push_back(next_wp2[0]);
-
-    ptsy.push_back(next_wp0[1]);
-    ptsy.push_back(next_wp1[1]);
-    ptsy.push_back(next_wp2[1]);
-
-    ptss.push_back(ref_s + 30);
-    ptss.push_back(ref_s + 60);
-    ptss.push_back(ref_s + 90);
-
-    vector<double> velocity_spaced_s_traj;
-    vector<double> volocity_spaced_x_traj;
-    vector<double> volocity_spaced_y_traj;
-    double updated_s = ref_s;
-    int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
-    double updated_v = ref_v;
-      //my_car.v + my_car.a * remaining_path_adopted_size;
-    // double target_a = decision.projected_kinematics.a;
-    double target_v = decision.projected_kinematics.v;
-      // max(my_car.v + target_a * UPDATE_INTERVAL, 10.0); // make the minimum speed to be 10 meters/second; new_traj_size
-    // target_v = min(SPEED_LIMIT, target_v);
-
-    // cout << "target_v: " << target_v;
-    const double VELOCITY_INCREMENT_LIMIT = 0.125;
-    double v_increment = 0;
-    double prev_updated_s = -MAX_S; // impossibly small
-
-    cout <<"target_v | updated_v: " << target_v << " | " << updated_v << " v_increment | updated_s: ";
-    for (int i = 0; i < new_traj_size ; i++) {
-      if (fabs(target_v - updated_v) < 2*VELOCITY_INCREMENT_LIMIT) {
-        v_increment = 0;
-      } else {
-        v_increment = copysign(VELOCITY_INCREMENT_LIMIT, target_v - updated_v);
-      }
-      updated_v += v_increment;
-      updated_s += updated_v * UPDATE_INTERVAL;
-      updated_s = wrap_around(updated_s);
-      if (updated_s <= prev_updated_s) {
-        break; // this updated_s would violate the assertion of spline of increasing values.
-      }
-      prev_updated_s = updated_s;
-
-      velocity_spaced_s_traj.push_back(updated_s);
-      cout << setw(5) << v_increment << " | " << updated_s << ", ";
-     }
-     cout << endl;
--------------------------- end of old trajectory generation
-// DEBUG
-// if (true // update_count == 0
-//     ) {
-//   update_count += 1;
-//   ofstream log;
-//   log.open("trajactory_xys.csv");
-//   log << "x,y,s" << endl;
-//   for (int i = 0; i < new_traj_size; i++) {
-//     log << volocity_spaced_x_traj[i] << ", " << volocity_spaced_y_traj[i] <<
-//       ", " << velocity_spaced_s_traj[i] << endl;
-//   }
-//   log.close();
-//  }
-
-// END of DEBUG
-
-// DEBUG
-// if (true // update_count == 1
-//     ) {
-//   update_count += 1;
-//   ofstream log;
-//   log.open("trajactory_xy.csv");
-//   log << "x,y" << endl;
-//   for (int i = remaining_path_adopted_size; i < trajectory.y_vals.size(); i++) {
-//     log << trajectory.x_vals[i] << ", " << trajectory.y_vals[i] << endl;
-//   }
-//   log.close();
-//  }
-//  cout.flags(old_settings);
-// END of DEBUG
-
-
- */
-
-
-// TRAJECTORY trajectory_f_old(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY remaining_trajectory,
-//                         WAYPOINTS_MAP waypoints_maps) {
-//   // vector<double> waypoints_maps._x, vector<double> waypoints_maps._y, vector<double> waypoints_maps._s) {
-//     TRAJECTORY trajectory; // the output
-//     DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion); // , 50*UPDATE_INTERVAL look ahead by a few intervals for potential collision
-//     vector<double> next_d = {my_car.d, my_car.d, my_car.d}; // the d coordinates for the seeding points for spline
-
-//     Decision decision;
-//     // decision.maneuver = KL; // default
-//     // cout << "fr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_front.empty &&
-//     //                        (data_lanes.lanes[my_car.lane_index].gap_front <= 0)) << ", ";
-//     // cout << "rr col: " << (!data_lanes.lanes[my_car.lane_index].nearest_back.empty &&
-//     //                        (data_lanes.lanes[my_car.lane_index].gap_behind <= 0)) << ", ";
-//     decision = maneuver(my_car, data_lanes);
-//     // int shift_direction = 0;
-//     // if (decision.maneuver == LCL) {
-//     //   shift_direction = -1;
-//     //  } else if (decision.maneuver == LCR) {
-//     //   shift_direction = 1;
-//     //  } else {
-//     //   shift_direction = 0;
-//     //  }
-//     // double lane_gap = abs(my_car.d - lane_center_d(decision.lane_index_changed_to));
-//     // next_d = {my_car.d + shift_direction * lane_gap * 0.2,
-//     //           my_car.d + shift_direction * lane_gap * 0.3,
-//     //           my_car.d + shift_direction * lane_gap * 0.5
-//     // };
-
-//     // cout << ", next lane: " << decision.lane_index_changed_to;
-//     // cout << " prev lane: " << my_car.lane_index; // << endl;
-
-//     // seeding points to generate smooth trajectory through spline
-//     vector<double> ptsx;
-//     vector<double> ptsy;
-//     vector<double> ptss;
-
-//     // reference x, y, yaw
-//     // either we will reference the starting point as where the car is
-//     // or at the end of the adopted remaining paths and points
-//     double ref_x   = my_car.x;
-//     double ref_y   = my_car.y;
-//     double ref_s   = my_car.s;
-//     cout << "from my_car.s, updating ref_s: " << ref_s << ", ";
-
-//     double ref_yaw = my_car.yaw;
-//     double ref_v   = my_car.v;
-
-//     int remaining_path_adopted_size  =
-//       min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
-//     // only the first portion of the remaining_path is used in the new trajectory planning.
-//     // This is a trade-off of considering continuity, and the delay in path planner in providing new
-//     // trajectory.
-//     // cout << ", remaining_path_adopted_size: " << remaining_path_adopted_size;
-//     // cout << endl;
-
-//     // For smooth path generation, replace car_s by
-//     // the end of the s at the adopted remaining path
-
-//     if (remaining_path_adopted_size < 2) {
-//       // If the previous trajectory is almost empty,
-//       // use car's current position as starting reference
-//       // use two points to make the path tangent to the car
-//       double prev_car_x = my_car.x - cos(my_car.yaw);
-//       double prev_car_y = my_car.y - sin(my_car.yaw);
-//       double prev_car_s = my_car.s - 1;
-
-//       ptsx.push_back(prev_car_x);
-//       ptsx.push_back(my_car.x);
-
-//       ptsy.push_back(prev_car_y);
-//       ptsy.push_back(my_car.y);
-
-//       ptss.push_back(prev_car_s);
-//       ptss.push_back(my_car.s);
-
-//      } else { // use the previous path's end point as starting reference
-//       // Redefine reference state by previous path and point
-//       ref_x = remaining_trajectory.x_vals[remaining_path_adopted_size-1];
-//       ref_y = remaining_trajectory.y_vals[remaining_path_adopted_size-1];
-
-//       double ref_x_prev = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
-//       double ref_y_prev = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
-//       ref_yaw = atan2(ref_y - ref_y_prev, ref_x - ref_x_prev); // in radians unit
-//       double prev_car_s = ref_s - my_car.v * UPDATE_INTERVAL;
-
-//       // use two points to make the path tangent to the previous path's end point
-//       ptsx.push_back(ref_x_prev);
-//       ptsx.push_back(ref_x);
-
-//       ptsy.push_back(ref_y_prev);
-//       ptsy.push_back(ref_y);
-
-//       ptss.push_back(prev_car_s);
-//       ptss.push_back(ref_s);
-
-//       // cout << "ref_x/y_prev: (" << ref_x_prev << ", " << ref_y_prev << "), ref_x/y: (" <<
-//       //   ref_x << ", " << ref_y << ")" << endl;
-//      }
-//     // The computation of ref_v may need higher accuracy.
-
-//     if (0 < remaining_path_adopted_size) { // replace car_s
-//       vector<double> frenet_s_d
-//         = getFrenet(remaining_trajectory.x_vals[remaining_path_adopted_size-1],
-//                     remaining_trajectory.y_vals[remaining_path_adopted_size-1],
-//                     ref_yaw,
-//                     waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
-//       ref_s = frenet_s_d[0];
-//       cout << "from remaining trajectory, updating ref_s: " << ref_s << ", ";
-//     }
-//     if (1 < remaining_path_adopted_size) {
-//       vector<double> frenet_s_d_prev
-//         = getFrenet(remaining_trajectory.x_vals[remaining_path_adopted_size-2],
-//                     remaining_trajectory.y_vals[remaining_path_adopted_size-2],
-//                     ref_yaw,
-//                     waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
-
-//       double ref_s_prev = frenet_s_d_prev[0];
-//       double ref_s_delta = (ref_s - ref_s_prev);
-//       //ref_v = ref_s_delta/UPDATE_INTERVAL;
-//       // ref_v = max(ref_v, 0.02); // estimate the minimum speed, not working,
-//       // causing non-increasing s sequence, probably due to lack of resolution.
-//       // cout << "ref_s: " << ref_s << ", ref_s_prev: " << ref_s_prev << ", ref_s_delta: " << ref_s_delta << ", ref_v: " << ref_v << ", ";
-//      }
-//     // In Frenet add evenly 30m spaced points ahead of the state reference
-//     vector<double> next_wp0 = getXY(wrap_around(ref_s + 30),
-//                                     lane_center_d(decision.lane_index_changed_to), //next_d[0],
-//                                     waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-//     vector<double> next_wp1 = getXY(wrap_around(ref_s + 60),
-//                                     lane_center_d(decision.lane_index_changed_to), //next_d[1],
-//                                     waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-//     vector<double> next_wp2 = getXY(wrap_around(ref_s + 90),
-//                                     lane_center_d(decision.lane_index_changed_to), //next_d[2],
-//                                     waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-
-//     ptsx.push_back(next_wp0[0]);
-//     ptsx.push_back(next_wp1[0]);
-//     ptsx.push_back(next_wp2[0]);
-
-//     ptsy.push_back(next_wp0[1]);
-//     ptsy.push_back(next_wp1[1]);
-//     ptsy.push_back(next_wp2[1]);
-
-//     ptss.push_back(ref_s + 30);
-//     ptss.push_back(ref_s + 60);
-//     ptss.push_back(ref_s + 90);
-
-//     vector<double> velocity_spaced_s_traj;
-//     vector<double> volocity_spaced_x_traj;
-//     vector<double> volocity_spaced_y_traj;
-//     double updated_s = ref_s;
-//     int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
-//     double updated_v = ref_v;
-//       //my_car.v + my_car.a * remaining_path_adopted_size;
-//     // double target_a = decision.projected_kinematics.a;
-//     double target_v = decision.projected_kinematics.v;
-//       // max(my_car.v + target_a * UPDATE_INTERVAL, 10.0); // make the minimum speed to be 10 meters/second; new_traj_size
-//     // target_v = min(SPEED_LIMIT, target_v);
-
-//     // cout << "target_v: " << target_v;
-//     const double VELOCITY_INCREMENT_LIMIT = 0.125;
-//     double v_increment = 0;
-//     double prev_updated_s = -MAX_S; // impossibly small
-
-//     cout <<"target_v | updated_v: " << target_v << " | " << updated_v << " v_increment | updated_s: ";
-//     for (int i = 0; i < new_traj_size ; i++) {
-//       if (fabs(target_v - updated_v) < 2*VELOCITY_INCREMENT_LIMIT) {
-//         v_increment = 0;
-//       } else {
-//         v_increment = copysign(VELOCITY_INCREMENT_LIMIT, target_v - updated_v);
-//       }
-//       updated_v += v_increment;
-//       updated_s += updated_v * UPDATE_INTERVAL;
-//       updated_s = wrap_around(updated_s);
-//       if (updated_s <= prev_updated_s) {
-//         break; // this updated_s would violate the assertion of spline of increasing values.
-//       }
-//       prev_updated_s = updated_s;
-
-//       velocity_spaced_s_traj.push_back(updated_s);
-//       cout << setw(5) << v_increment << " | " << updated_s << ", ";
-//      }
-//      cout << endl;
-
-//     volocity_spaced_x_traj = interpolate_points(ptss, ptsx, velocity_spaced_s_traj);
-//     volocity_spaced_y_traj = interpolate_points(ptss, ptsy, velocity_spaced_s_traj);
-//     // Start with all of the previous path points from last time
-//     for (int i = 0; i < remaining_path_adopted_size; i++) {
-//       trajectory.x_vals.push_back(remaining_trajectory.x_vals[i]);
-//       trajectory.y_vals.push_back(remaining_trajectory.y_vals[i]);
-//     }
-
-//     // Fill up the rest of the points for the planner
-//     for (int i = 0; i < velocity_spaced_s_traj.size(); i++) {
-//       trajectory.x_vals.push_back(volocity_spaced_x_traj[i]);
-//       trajectory.y_vals.push_back(volocity_spaced_y_traj[i]);
-//     }
-//       // DEBUG
-//     // if (true // update_count == 0
-//     //     ) {
-//     //   update_count += 1;
-//     //   ofstream log;
-//     //   log.open("trajactory_xys.csv");
-//     //   log << "x,y,s" << endl ;
-//     //   for (int i = 0; i < new_traj_size; i++) {
-//     //     log << volocity_spaced_x_traj[i] << ", " << volocity_spaced_y_traj[i] <<
-//     //       ", " << velocity_spaced_s_traj[i] << endl;
-//     //   }
-//     //   log.close();
-//     //  }
-
-//     // END of DEBUG
-
-//     // DEBUG
-//     // if (true // update_count == 1
-//     //     ) {
-//     //   update_count += 1;
-//     //   ofstream log;
-//     //   log.open("trajactory_xy.csv");
-//     //   log << "x,y" << endl;
-//     //   for (int i = remaining_path_adopted_size; i < trajectory.y_vals.size(); i++) {
-//     //     log << trajectory.x_vals[i] << ", " << trajectory.y_vals[i] << endl;
-//     //   }
-//     //   log.close();
-//     //  }
-//     //  cout.flags(old_settings);
-//     // END of DEBUG
-
-//     return trajectory;
-//   }
 
 int main() {
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
