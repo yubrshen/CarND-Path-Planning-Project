@@ -197,7 +197,7 @@ The v_x, v_y values can be useful for predicting where the cars will be in the f
   const double LANE_CHANGE_C= .1E2f;
   const double NEAR_ZERO = .1E-1f;
   const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
-  const double SAFE_DISTANCE = 70.0; // meters, huge number for indefinite futrue time
+  const double SAFE_DISTANCE = 90.0; // meters, huge number for indefinite futrue time
 
   #endif
 #+END_SRC
@@ -948,7 +948,7 @@ Compute the decision should the maneuver is performed.
     //   }
     double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
     double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-    return cost_front + 0.1 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+    return cost_front + 0.5 * cost_behind; // might want to consider if the gap_front should have bigger weight.
     }
 #+END_SRC
 
@@ -1212,7 +1212,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
       min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
 
     int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
-    cout << " new_traj_size: " << new_traj_size << "; ";
+    // cout << " new_traj_size: " << new_traj_size << "; ";
 
     double start_time = remaining_path_adopted_size * UPDATE_INTERVAL;
     double end_time   = start_time + new_traj_size  * UPDATE_INTERVAL;
@@ -1334,8 +1334,17 @@ Here is the core of the path plan, computing a series of x, y values for the sim
 
     double next_v = start_v;
     const double VELOCITY_INCREMENT_LIMIT = 0.125;
+    cout << " next_v: ";
     for (int i = 0; i < new_traj_size; i++) {
-      double v_incr;
+      double v_incr = 0;
+      next_s += next_v * UPDATE_INTERVAL;
+      // prevent non-increasing s values:
+      next_s = wrap_around(next_s);
+      if (next_s <= prev_updated_s)
+        break;
+      prev_updated_s = next_s;
+      cout << setw(5) << next_v << ", ";
+      interpolated_s_traj.push_back(next_s);
       if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
         v_incr = 0;
       } else {
@@ -1343,14 +1352,6 @@ Here is the core of the path plan, computing a series of x, y values for the sim
         v_incr = (target_v - next_v)/(fabs(target_v - next_v)) * VELOCITY_INCREMENT_LIMIT;
       }
       next_v += v_incr;
-      next_s += next_v * UPDATE_INTERVAL;
-      // prevent non-increasing s values:
-      next_s = wrap_around(next_s);
-      if (next_s <= prev_updated_s)
-        break;
-      prev_updated_s = next_s;
-      cout << "next_s: " << setw(5) << next_s << ", ";
-      interpolated_s_traj.push_back(next_s);
     }
 
     interpolated_x_traj = interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);

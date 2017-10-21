@@ -625,7 +625,7 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   //   }
   double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-  return cost_front + 0.1 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+  return cost_front + 0.5 * cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
@@ -834,7 +834,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
 
   int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
-  cout << " new_traj_size: " << new_traj_size << "; ";
+  // cout << " new_traj_size: " << new_traj_size << "; ";
 
   double start_time = remaining_path_adopted_size * UPDATE_INTERVAL;
   double end_time   = start_time + new_traj_size  * UPDATE_INTERVAL;
@@ -956,8 +956,17 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
 
   double next_v = start_v;
   const double VELOCITY_INCREMENT_LIMIT = 0.125;
+  cout << " next_v: ";
   for (int i = 0; i < new_traj_size; i++) {
-    double v_incr;
+    double v_incr = 0;
+    next_s += next_v * UPDATE_INTERVAL;
+    // prevent non-increasing s values:
+    next_s = wrap_around(next_s);
+    if (next_s <= prev_updated_s)
+      break;
+    prev_updated_s = next_s;
+    cout << setw(5) << next_v << ", ";
+    interpolated_s_traj.push_back(next_s);
     if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
       v_incr = 0;
     } else {
@@ -965,14 +974,6 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
       v_incr = (target_v - next_v)/(fabs(target_v - next_v)) * VELOCITY_INCREMENT_LIMIT;
     }
     next_v += v_incr;
-    next_s += next_v * UPDATE_INTERVAL;
-    // prevent non-increasing s values:
-    next_s = wrap_around(next_s);
-    if (next_s <= prev_updated_s)
-      break;
-    prev_updated_s = next_s;
-    cout << "next_s: " << setw(5) << next_s << ", ";
-    interpolated_s_traj.push_back(next_s);
   }
 
   interpolated_x_traj = interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);
