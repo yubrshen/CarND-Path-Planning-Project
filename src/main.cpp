@@ -99,7 +99,7 @@ struct Decision {
   KINEMATIC_DATA projected_kinematics; // for key: "velocity", and "acceleration"
 };
 
-struct CarDescription {
+struct Car {
   double id;
   double x;
   double y;
@@ -118,8 +118,8 @@ struct CarDescription {
 };
 
 struct LaneData {
-  CarDescription nearest_front;
-  CarDescription nearest_back;
+  Car nearest_front;
+  Car nearest_back;
   // double         car_density_front;
   double gap_front; // the projected smallest distance with the car in front, depreciated
   double gap_behind; // the projected smallest distance with the car behind, depreciated
@@ -140,7 +140,7 @@ struct TRAJECTORY {
 };
 
 typedef vector< vector<double> > SENSOR_FUSION;
-// double projected_gap(CarDescription front, CarDescription behind, double delta_t = UPDATE_INTERVAL) {
+// double projected_gap(Car front, Car behind, double delta_t = UPDATE_INTERVAL) {
 //     // ignore accelerations, assuming they are 0, to simplify
 //     return front.s - behind.s + (front.v - behind.v)*delta_t - VEHICLE_LENGTH;
 //   }
@@ -175,7 +175,7 @@ double threshold_congestion(double time_threshold, double start_time)
   return c;
 }
 
-double congestion_f(CarDescription front, CarDescription behind, double start_time, double end_time)
+double congestion_f(Car front, Car behind, double start_time, double end_time)
 { // returns the congestion coefficient between the two cars.
   // To simplify, assume they have zero acceleration
   double c = 0.0;
@@ -205,7 +205,7 @@ double congestion_f(CarDescription front, CarDescription behind, double start_ti
     }
   return c;
 }
-void update_surronding(CarDescription my_car, double congestion, int lane, DATA_LANES *data_lanes) {
+void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data_lanes) {
   /*
     Based on the distance between the car in front, and that behind, congestion to determine the car's
     status, represented in the fields of DATA_LANES: car_crashing_front_or_behind, car_to_left, car_to_right.
@@ -237,7 +237,7 @@ void update_surronding(CarDescription my_car, double congestion, int lane, DATA_
 
 // The following should change to buffer_coefficient_f
 
-double shortest_distance(CarDescription front, CarDescription behind, double start_time, double end_time)
+double shortest_distance(Car front, Car behind, double start_time, double end_time)
 { // compute the shortest distance between the car in front and the behind from start_time to end_time.
   // To simplify, assume they have zero acceleration
   double dist;
@@ -251,7 +251,7 @@ double shortest_distance(CarDescription front, CarDescription behind, double sta
   return max(dist, 0.0); // ensure that it's non-negative. when it's negative, it's already way too close.
 }
 
-DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion, double start_time, double end_time)
+DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double start_time, double end_time)
 { // find the nearest car in front, and behind, and find the smallest (worst) distance with my_car in the time period
   // defined by start and end.
 
@@ -268,7 +268,7 @@ DATA_LANES parse_sensor_data(CarDescription my_car, SENSOR_FUSION sensor_fusion,
     data_lanes.lanes[i].congestion_behind = 0.0;
     }
 
-  CarDescription a_car;
+  Car a_car;
   for (auto data:sensor_fusion)
     { // find the nearest in front and behind
     a_car.d  = data[6];
@@ -355,7 +355,7 @@ typename T::iterator min_map_element(T& m) {
 
 
 
-void update_gaps_in_kinematic(CarDescription front, CarDescription my_car, CarDescription behind,
+void update_gaps_in_kinematic(Car front, Car my_car, Car behind,
                               double horizon, KINEMATIC_DATA *kinematic) {
   kinematic->horizon = horizon;
   if (behind.empty) {
@@ -378,7 +378,7 @@ double const ONE_OVER_ADJUSTMENT_INTERVAL_SQUARE =
 double const ONE_OVER_ADJUSTMENT_INTERVAL = 1/SPEED_ADJUSTMENT_PERIOD;
 
 // KINEMATIC_DATA kinematic_required_in_front
-// (CarDescription my_car, DATA_LANES data_lanes, int lane_changed_to) {
+// (Car my_car, DATA_LANES data_lanes, int lane_changed_to) {
 //   KINEMATIC_DATA kinematic;
 //   // double acceleration;
 //   double extra_speed_allowed = SPEED_LIMIT - my_car.v;
@@ -426,7 +426,7 @@ double const ONE_OVER_ADJUSTMENT_INTERVAL = 1/SPEED_ADJUSTMENT_PERIOD;
 //   return kinematic;
 // }
 KINEMATIC_DATA kinematic_required_in_front
-(CarDescription my_car, DATA_LANES data_lanes, int lane_changed_to) {
+(Car my_car, DATA_LANES data_lanes, int lane_changed_to) {
   KINEMATIC_DATA kinematic;
   kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
   kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
@@ -446,7 +446,7 @@ KINEMATIC_DATA kinematic_required_in_front
 }
 //map<string, double>
 KINEMATIC_DATA kinematic_required_behind
-(CarDescription my_car, DATA_LANES data_lanes, int lane_index) {
+(Car my_car, DATA_LANES data_lanes, int lane_index) {
   KINEMATIC_DATA kinematic;
   if (data_lanes.lanes[lane_index].nearest_back.empty) {
     kinematic.a = my_car.a;
@@ -473,7 +473,7 @@ KINEMATIC_DATA kinematic_required_behind
                            10*UPDATE_INTERVAL, &kinematic);
   return kinematic;
 }
-Decision project_maneuver(MANEUVER_STATE proposed_state, CarDescription my_car, DATA_LANES data_lanes) {
+Decision project_maneuver(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
   Decision decision;
   int changed_lane = my_car.lane_index;
 
@@ -533,7 +533,7 @@ double collision_time_in_future(double a, double b, double c, double horizon) {
   return s;
 }
 
-double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
   double front_collision_cost  = 0;
   double behind_collision_cost = 0;
   double gap_front_0  = SAFE_DISTANCE;
@@ -608,7 +608,7 @@ double collision_cost_f(Decision decision, CarDescription my_car, DATA_LANES dat
 // I'm confused with case of PLCL, and PLCR, on which lane, the collision risk is accessed?
 // It should be on the current lane, not the contemplating lane.
 // Need to double check.
-double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes)
+double buffer_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
 { // express the requirements that both the gap_front and gap_behind should be
   // larger or equal to SAFE_DISTANCE.
 
@@ -627,30 +627,30 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
   return cost_front + 0.7 * cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
-double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+double inefficiency_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
   // expect the speed can match SPEED_LIMIT in 1 UPDATE_INTERVAL seconds
   // just relatively compare
   double cost = pow((SPEED_LIMIT - projected_v)/SPEED_LIMIT, 2);
   return cost;
 }
-double not_middle_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+double not_middle_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
   // favor the middle lane, to have more options to change lane when needed
   return logistic(fabs(decision.lane_index_changed_to - 2));
 }
-double lane_change_extra_cost_f(Decision decision) {
+double lane_change_extra_cost_f(Car my_car, Decision decision) {
   if ((decision.maneuver == LCL) || (decision.maneuver == LCR))
-    return 1;
+    return exp(-fabs(my_car.v));
   else
     return 0;
 }
-double calculate_cost(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
+double calculate_cost(Decision decision, Car my_car, DATA_LANES data_lanes) {
   // cout << " lane: " << decision.lane_index_changed_to;
   double collision_cost         = COLLISION_C *   collision_cost_f(decision, my_car, data_lanes);
   double inefficiency_cost      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
   double buffer_cost            = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
   double not_middle_cost        = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
-  double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(decision);
+  double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(my_car, decision);
   double cost
     = collision_cost + buffer_cost + inefficiency_cost + not_middle_cost + lane_change_extra_cost;
   cout << "coll. c: " << setw(3) << collision_cost << " buf. c: " << setw(3) << buffer_cost
@@ -658,12 +658,12 @@ double calculate_cost(Decision decision, CarDescription my_car, DATA_LANES data_
   return cost;
 }
 
-Decision evaluate_decision(MANEUVER_STATE proposed_state, CarDescription my_car, DATA_LANES data_lanes) {
+Decision evaluate_decision(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
   Decision decision = project_maneuver(proposed_state, my_car, data_lanes);
   decision.cost = calculate_cost(decision, my_car, data_lanes);
   return decision;
 }
-Decision maneuver(CarDescription my_car, DATA_LANES data_lanes) {
+Decision maneuver(Car my_car, DATA_LANES data_lanes) {
   vector<MANEUVER_STATE> states;
   if (!data_lanes.car_crashing_front_or_behind) {
     states.push_back(KL);
@@ -767,7 +767,7 @@ struct WAYPOINTS_MAP {
 int NUM_WAYPOINTS_BEHIND = 5;
 int NUM_WAYPOINTS_AHEAD  = 5;
 
-WAYPOINTS_MAP refine_maps_f(CarDescription my_car, vector<double> map_waypoints_x, vector<double> map_waypoints_y, vector<double> map_waypoints_s,
+WAYPOINTS_MAP refine_maps_f(Car my_car, vector<double> map_waypoints_x, vector<double> map_waypoints_y, vector<double> map_waypoints_s,
                             vector<double> map_waypoints_dx, vector<double> map_waypoints_dy) {
   // ********************* CONSTRUCT INTERPOLATED WAYPOINTS OF NEARBY AREA **********************
   int num_waypoints = map_waypoints_x.size();
@@ -826,7 +826,7 @@ WAYPOINTS_MAP refine_maps_f(CarDescription my_car, vector<double> map_waypoints_
 
 // Next to resolve the compilation dependency.
 
-TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY remaining_trajectory,
+TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY remaining_trajectory,
                         WAYPOINTS_MAP waypoints_maps) {
   TRAJECTORY trajectory; // the output
 
@@ -1027,7 +1027,7 @@ int main() {
     	map_waypoints_dy.push_back(d_y);
     }
   // double ref_val = MAX_VELOCITY_DELTA_PRE_PLANNING_INTERVAL; // initial
-  CarDescription my_car;
+  Car my_car;
   my_car.a = 0;
   my_car.jerk = 0;
   
