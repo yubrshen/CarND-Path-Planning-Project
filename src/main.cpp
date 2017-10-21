@@ -1034,9 +1034,8 @@ int main() {
 
   int update_count = 0; // used to debug to capture the first trace
   uWS::Hub h;
-  h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,
-               &my_car,
-               &update_count]
+  h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx,
+               &map_waypoints_dy, &my_car, &update_count]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -1048,17 +1047,17 @@ int main() {
       if (s != "") {
         auto j = json::parse(s);
         string event = j[0].get<string>();
-
-        if (event == "telemetry") {
-          // j[1] is the data JSON object
-          // Main car's localization Data
+        if (event == "telemetry")
+          {
+            // j[1] is the data JSON object
+            // My car's localization Data
             double car_x = j[1]["x"];
             double car_y = j[1]["y"];
             double car_s = j[1]["s"];
             double car_d = j[1]["d"];
             double car_yaw = j[1]["yaw"]; // in degree
             double car_speed = j[1]["speed"]; // in mile per hour
-
+        
             // Previous path data given to the Planner
             // actually they are the remaining points of trajectory not yet visited by the car
             // they are issued by the path planner to the car in the previous control time
@@ -1067,79 +1066,79 @@ int main() {
             // Previous path's end s and d values
             double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
             double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
-
-            cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
-
-            // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-            // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-            // << endl;
-
-            // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-            //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-            //      << endl;
-
+        
             // Sensor Fusion Data, a list of all other cars on the same side of the road.
             auto sensor_fusion = j[1]["sensor_fusion"];
-
-            // Assemble information to call trajectory_f:
-            my_car.id = -1; // hopefully impossible id of the other cars
-            my_car.x  = car_x;
-            my_car.y  = car_y;
-            my_car.yaw = deg2rad(car_yaw);
+        
+            cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
             
-            double old_v = my_car.v;
-            my_car.v  = mph_2_meterps(car_speed);
-            my_car.s  = wrap_around(car_s);
-            my_car.d  = car_d;
-            my_car.lane_index = d_to_lane_index(car_d);
+                // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+                // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+                // << endl;
             
-            double old_a = my_car.a;
-            my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
+                // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+                //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+                //      << endl;
             
-            my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
             
-            my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
-            my_car.remaining_path_end_d = remaining_path_end_d;
+              // Assemble information to call trajectory_f:
+              my_car.id = -1; // hopefully impossible id of the other cars
+              my_car.x  = car_x;
+              my_car.y  = car_y;
+              my_car.yaw = deg2rad(car_yaw);
             
-            ios::fmtflags old_settings = cout.flags();
-            cout.precision(5);
+              double old_v = my_car.v;
+              my_car.v  = mph_2_meterps(car_speed);
+              my_car.s  = wrap_around(car_s);
+              my_car.d  = car_d;
+              my_car.lane_index = d_to_lane_index(car_d);
             
-            TRAJECTORY remaining_trajectory;
-            // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
-            // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
-            // the vector assginment.
-            // cout << endl;
-            // cout << "remaining x: ";
-            for (auto x:remaining_path_x) {
-              remaining_trajectory.x_vals.push_back(x);
-              // cout << setw(6) << x << ", ";
-             }
+              double old_a = my_car.a;
+              my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
             
-            //cout << endl;
-            //cout << "remaining y: ";
-            for (auto y:remaining_path_y) {
-              remaining_trajectory.y_vals.push_back(y);
-              // cout << setw(6) << y << ", ";
-             }
+              my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
             
-            // cout << endl;
+              my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
+              my_car.remaining_path_end_d = remaining_path_end_d;
             
-            // remaining_trajectory.x_vals = remaining_path_x;
-            // remaining_trajectory.y_vals = remaining_path_y;
+              ios::fmtflags old_settings = cout.flags();
+              cout.precision(5);
             
-            // Fix and refine the waypoint maps to improve the resolution of computing
-            // ref_v based on the remaining trajectory, for smoother trajectory planning.
+              TRAJECTORY remaining_trajectory;
+              // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
+              // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
+              // the vector assginment.
+              // cout << endl;
+              // cout << "remaining x: ";
+              for (auto x:remaining_path_x) {
+                remaining_trajectory.x_vals.push_back(x);
+                // cout << setw(6) << x << ", ";
+               }
             
-            WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
-                                                     map_waypoints_x, map_waypoints_y, map_waypoints_s,
-                                                     map_waypoints_dx, map_waypoints_dy);
-            TRAJECTORY trajectory
-            = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
+              //cout << endl;
+              //cout << "remaining y: ";
+              for (auto y:remaining_path_y) {
+                remaining_trajectory.y_vals.push_back(y);
+                // cout << setw(6) << y << ", ";
+               }
             
-            // // Define the actual (x, y) points in the planner
-            // vector<double> next_x_vals;
-            // vector<double> next_y_vals;
-
+              // cout << endl;
+            
+              // remaining_trajectory.x_vals = remaining_path_x;
+              // remaining_trajectory.y_vals = remaining_path_y;
+            
+              // Fix and refine the waypoint maps to improve the resolution of computing
+              // ref_v based on the remaining trajectory, for smoother trajectory planning.
+            
+              WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
+                                                       map_waypoints_x, map_waypoints_y, map_waypoints_s,
+                                                       map_waypoints_dx, map_waypoints_dy);
+              TRAJECTORY trajectory
+              = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
+            
+              // // Define the actual (x, y) points in the planner
+              // vector<double> next_x_vals;
+              // vector<double> next_y_vals;
             // cout << endl;
             // cout << "planned traj. sent to simulator" << endl;
             // cout << "x: ";
@@ -1152,16 +1151,16 @@ int main() {
             //   cout << setw(6) << y << ", ";
             // }
             // cout << endl;
-
+        
             json msgJson;
             msgJson["next_x"] = trajectory.x_vals;
             msgJson["next_y"] = trajectory.y_vals;
-
+        
             auto msg = "42[\"control\","+ msgJson.dump()+"]";
-
+        
             //this_thread::sleep_for(chrono::milliseconds(1000));
             ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-        }
+          }
       } else {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
@@ -1183,18 +1182,16 @@ int main() {
       res->end(nullptr, 0);
     }
   });
-
-     h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
-         std::cout << "Connected!!!" << std::endl;
-       });
-     
-       h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
-                              char *message, size_t length) {
-         ws.close();
-         std::cout << "Disconnected" << std::endl;
-       });
-
-     int port = 4567;
+  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+      std::cout << "Connected!!!" << std::endl;
+    });
+  
+    h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
+                           char *message, size_t length) {
+      ws.close();
+      std::cout << "Disconnected" << std::endl;
+    });
+  int port = 4567;
   if (h.listen(port)) {
     std::cout << "Listening to port " << port << std::endl;
   } else {

@@ -9,33 +9,104 @@
 #+LATEX_COMPILER: pdflatex
 #+OPTIONS: toc:nil ^:nil
 #+DATE: \today
-#+TITLE: Design Workbook for Path Planning
+#+AUTHOR: Yu Shen
+#+TITLE: Design of Path Planning for Self Driving Car
+
+* Introduction
+
+This document provides a design and implementation of path planning for self-driving-car. It's a project
+for Udacity Nano-Degree of Self-Driving-Car. The documents "literate-programming" approach to present the
+design and implementation.
 
 * The definition of data
+
+  The following is the definition of the input and output data. They serves as the assumption of the
+  design.
+
+  They are copied from the project requirements with some my own digestion.
 
 ** Definition of waypoint data
 - Waypoint Data
 Each waypoint has an (x,y) global map position, and a Frenet s value and Frenet d unit normal vector (split up into the x component, and the y component).
 
-The s value is the distance along the direction of the road. The first waypoint has an s value of 0 because it is the starting point.
+The s value is the distance along the direction of the road.
+The first waypoint has an s value of 0 because it is the starting point.
 
-The d vector has a magnitude of 1 and points perpendicular to the road in the direction of the right-hand side of the road. The d vector can be used to calculate lane positions. For example, if you want to be in the left lane at some waypoint just add the waypoint's (x,y) coordinates with the d vector multiplied by 2. Since the lane is 4 m wide, the middle of the left lane (the lane closest to the double-yellow diving line) is 2 m from the waypoint.
+The d vector has a magnitude of 1 and
+points perpendicular to the road in the direction of the right-hand side of the road.
+The d vector can be used to calculate lane positions.
+For example, if you want to be in the left lane at some waypoint
+just add the waypoint's (x,y) coordinates with the d vector multiplied by 2.
+Since the lane is 4 m wide,
+the middle of the left lane (the lane closest to the double-yellow diving line) is 2 m
+from the waypoint.
 
-If you would like to be in the middle lane, add the waypoint's coordinates to the d vector multiplied by 6 = (2+4), since the center of the middle lane is 4 m from the center of the left lane, which is itself 2 m from the double-yellow diving line and the waypoints.
+If you would like to be in the middle lane,
+add the waypoint's coordinates to the d vector multiplied by 6 = (2+4),
+since the center of the middle lane is 4 m from the center of the left lane,
+which is itself 2 m from the double-yellow diving line and the waypoints.
+
 ** Definition of sensor_fusion data
-The data format for each car is: [ id, x, y, v_x, v_y, s, d]. The id is a unique identifier for that car. The x, y values are in global map coordinates, and the v_x, v_y values are the velocity components, also in reference to the global map. Finally s and d are the Frenet coordinates for that car.
+The data format for each car is:
+[ id, x, y, v_x, v_y, s, d].
+The id is a unique identifier for that car.
+The x, y values are in global map coordinates, and
+the v_x, v_y values are the velocity components, also in reference to the global map.
+Finally s and d are the Frenet coordinates for that car.
 
-The v_x, v_y values can be useful for predicting where the cars will be in the future. For instance, if you were to assume that the tracked car kept moving along the road, then its future predicted Frenet s value will be its current s value plus its (transformed) total velocity (m/s) multiplied by the time elapsed into the future (s).
+The v_x, v_y values can be useful for predicting where the cars will be in the future.
+For instance, if you were to assume that the tracked car kept moving along the road,
+then its future predicted Frenet s value will be its current s value
+plus its (transformed) total velocity (m/s) multiplied by the time elapsed into the future (s).
+
 * The interface to the simulator
 
-  The path planning module should send to the simulator, the x, y coordinates in interval to drive the car to move to the given coordinates.
-  More formal definition is needed here to get the program working.
+  The path planning module should send to the simulator,
+  the x, y coordinates in an interval to drive the car to move to the given coordinates.
 
-  The code responsible for driving the simulator:
+  The interval that the simulator moves the car along is fixed. The value is 0.02 seconds.
+
+  The spacing between the points with the fixed interval determines the speed and acceleration of the
+  car.
+
+  The code responsible for interacting and driving the simulator as follows:
 
   #+NAME:driving-simulator
   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    if (event == "telemetry")
+      {
+        // j[1] is the data JSON object
+        // My car's localization Data
+        double car_x = j[1]["x"];
+        double car_y = j[1]["y"];
+        double car_s = j[1]["s"];
+        double car_d = j[1]["d"];
+        double car_yaw = j[1]["yaw"]; // in degree
+        double car_speed = j[1]["speed"]; // in mile per hour
 
+        // Previous path data given to the Planner
+        // actually they are the remaining points of trajectory not yet visited by the car
+        // they are issued by the path planner to the car in the previous control time
+        auto remaining_path_x = j[1]["previous_path_x"];
+        auto remaining_path_y = j[1]["previous_path_y"];
+        // Previous path's end s and d values
+        double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
+        double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
+
+        // Sensor Fusion Data, a list of all other cars on the same side of the road.
+        auto sensor_fusion = j[1]["sensor_fusion"];
+
+        <<path_plan>>
+
+        json msgJson;
+        msgJson["next_x"] = trajectory.x_vals;
+        msgJson["next_y"] = trajectory.y_vals;
+
+        auto msg = "42[\"control\","+ msgJson.dump()+"]";
+
+        //this_thread::sleep_for(chrono::milliseconds(1000));
+        ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+      }
   #+END_SRC
 * Design
 ** Overall design decisions
@@ -1140,64 +1211,87 @@ Here are the data from the map file:
 Here is the core of the path plan, computing a series of x, y values for the simulator to move to.
 #+NAME:path_plan
 #+BEGIN_SRC C++ :noweb yes :tangle :exports code
-  // Assemble information to call trajectory_f:
-  my_car.id = -1; // hopefully impossible id of the other cars
-  my_car.x  = car_x;
-  my_car.y  = car_y;
-  my_car.yaw = deg2rad(car_yaw);
+  cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
 
-  double old_v = my_car.v;
-  my_car.v  = mph_2_meterps(car_speed);
-  my_car.s  = wrap_around(car_s);
-  my_car.d  = car_d;
-  my_car.lane_index = d_to_lane_index(car_d);
+      // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+      // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+      // << endl;
 
-  double old_a = my_car.a;
-  my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
+      // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+      //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+      //      << endl;
 
-  my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
 
-  my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
-  my_car.remaining_path_end_d = remaining_path_end_d;
+    // Assemble information to call trajectory_f:
+    my_car.id = -1; // hopefully impossible id of the other cars
+    my_car.x  = car_x;
+    my_car.y  = car_y;
+    my_car.yaw = deg2rad(car_yaw);
 
-  ios::fmtflags old_settings = cout.flags();
-  cout.precision(5);
+    double old_v = my_car.v;
+    my_car.v  = mph_2_meterps(car_speed);
+    my_car.s  = wrap_around(car_s);
+    my_car.d  = car_d;
+    my_car.lane_index = d_to_lane_index(car_d);
 
-  TRAJECTORY remaining_trajectory;
-  // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
-  // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
-  // the vector assginment.
+    double old_a = my_car.a;
+    my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
+
+    my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
+
+    my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
+    my_car.remaining_path_end_d = remaining_path_end_d;
+
+    ios::fmtflags old_settings = cout.flags();
+    cout.precision(5);
+
+    TRAJECTORY remaining_trajectory;
+    // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
+    // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
+    // the vector assginment.
+    // cout << endl;
+    // cout << "remaining x: ";
+    for (auto x:remaining_path_x) {
+      remaining_trajectory.x_vals.push_back(x);
+      // cout << setw(6) << x << ", ";
+     }
+
+    //cout << endl;
+    //cout << "remaining y: ";
+    for (auto y:remaining_path_y) {
+      remaining_trajectory.y_vals.push_back(y);
+      // cout << setw(6) << y << ", ";
+     }
+
+    // cout << endl;
+
+    // remaining_trajectory.x_vals = remaining_path_x;
+    // remaining_trajectory.y_vals = remaining_path_y;
+
+    // Fix and refine the waypoint maps to improve the resolution of computing
+    // ref_v based on the remaining trajectory, for smoother trajectory planning.
+
+    WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
+                                             map_waypoints_x, map_waypoints_y, map_waypoints_s,
+                                             map_waypoints_dx, map_waypoints_dy);
+    TRAJECTORY trajectory
+    = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
+
+    // // Define the actual (x, y) points in the planner
+    // vector<double> next_x_vals;
+    // vector<double> next_y_vals;
   // cout << endl;
-  // cout << "remaining x: ";
-  for (auto x:remaining_path_x) {
-    remaining_trajectory.x_vals.push_back(x);
-    // cout << setw(6) << x << ", ";
-   }
-
-  //cout << endl;
-  //cout << "remaining y: ";
-  for (auto y:remaining_path_y) {
-    remaining_trajectory.y_vals.push_back(y);
-    // cout << setw(6) << y << ", ";
-   }
-
+  // cout << "planned traj. sent to simulator" << endl;
+  // cout << "x: ";
+  // for (auto x:trajectory.x_vals) {
+  //   cout << setw(6) << x << ", ";
+  // }
   // cout << endl;
-
-  // remaining_trajectory.x_vals = remaining_path_x;
-  // remaining_trajectory.y_vals = remaining_path_y;
-
-  // Fix and refine the waypoint maps to improve the resolution of computing
-  // ref_v based on the remaining trajectory, for smoother trajectory planning.
-
-  WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
-                                           map_waypoints_x, map_waypoints_y, map_waypoints_s,
-                                           map_waypoints_dx, map_waypoints_dy);
-  TRAJECTORY trajectory
-  = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
-
-  // // Define the actual (x, y) points in the planner
-  // vector<double> next_x_vals;
-  // vector<double> next_y_vals;
+  // cout << "y: ";
+  // for (auto y:trajectory.y_vals) {
+  //   cout << setw(6) << y << ", ";
+  // }
+  // cout << endl;
 #+END_SRC
 
 *** trajactory
@@ -1526,9 +1620,8 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
 
     int update_count = 0; // used to debug to capture the first trace
     uWS::Hub h;
-    h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,
-                 &my_car,
-                 &update_count]
+    h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx,
+                 &map_waypoints_dy, &my_car, &update_count]
                 (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
       // "42" at the start of the message means there's a websocket message event.
       // The 4 signifies a websocket message
@@ -1540,63 +1633,7 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
         if (s != "") {
           auto j = json::parse(s);
           string event = j[0].get<string>();
-
-          if (event == "telemetry") {
-            // j[1] is the data JSON object
-            // Main car's localization Data
-              double car_x = j[1]["x"];
-              double car_y = j[1]["y"];
-              double car_s = j[1]["s"];
-              double car_d = j[1]["d"];
-              double car_yaw = j[1]["yaw"]; // in degree
-              double car_speed = j[1]["speed"]; // in mile per hour
-
-              // Previous path data given to the Planner
-              // actually they are the remaining points of trajectory not yet visited by the car
-              // they are issued by the path planner to the car in the previous control time
-              auto remaining_path_x = j[1]["previous_path_x"];
-              auto remaining_path_y = j[1]["previous_path_y"];
-              // Previous path's end s and d values
-              double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
-              double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
-
-              cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
-
-              // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-              // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-              // << endl;
-
-              // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-              //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-              //      << endl;
-
-              // Sensor Fusion Data, a list of all other cars on the same side of the road.
-              auto sensor_fusion = j[1]["sensor_fusion"];
-
-              <<path_plan>>
-
-              // cout << endl;
-              // cout << "planned traj. sent to simulator" << endl;
-              // cout << "x: ";
-              // for (auto x:trajectory.x_vals) {
-              //   cout << setw(6) << x << ", ";
-              // }
-              // cout << endl;
-              // cout << "y: ";
-              // for (auto y:trajectory.y_vals) {
-              //   cout << setw(6) << y << ", ";
-              // }
-              // cout << endl;
-
-              json msgJson;
-              msgJson["next_x"] = trajectory.x_vals;
-              msgJson["next_y"] = trajectory.y_vals;
-
-              auto msg = "42[\"control\","+ msgJson.dump()+"]";
-
-              //this_thread::sleep_for(chrono::milliseconds(1000));
-              ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-          }
+          <<driving-simulator>>
         } else {
           // Manual driving
           std::string msg = "42[\"manual\",{}]";
@@ -1606,10 +1643,8 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
     });
 
     <<onHttpRequest>>
-
-       <<on_connection_handling>>
-
-       int port = 4567;
+    <<on_connection_handling>>
+    int port = 4567;
     if (h.listen(port)) {
       std::cout << "Listening to port " << port << std::endl;
     } else {
