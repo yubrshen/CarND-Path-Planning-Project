@@ -214,7 +214,7 @@ void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data
   data_lanes-> car_crashing_front_or_behind = false;
   data_lanes-> car_to_left                  = false;
   data_lanes-> car_to_right                 = false;
-  if (1.0 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
+  if (0.899 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
     {
     switch (my_car.lane_index - lane) {
     case 0:
