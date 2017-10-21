@@ -214,7 +214,7 @@ void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data
   data_lanes-> car_crashing_front_or_behind = false;
   data_lanes-> car_to_left                  = false;
   data_lanes-> car_to_right                 = false;
-  if (0.99 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
+  if (1.0 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
     {
     switch (my_car.lane_index - lane) {
     case 0:
@@ -625,7 +625,7 @@ double buffer_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
   //   }
   double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-  return cost_front + 0.7 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+  return cost_front + 1.0 * cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
@@ -670,17 +670,17 @@ Decision maneuver(Car my_car, DATA_LANES data_lanes) {
   }
   // starting from 0, from the left most to the right most
   if (0 < my_car.lane_index) {// change to left lane possible
-    states.push_back(LCL);
-    // if (!data_lanes.car_to_left) {
-    //   states.push_back(LCL);
-    // }
+    // states.push_back(LCL);
+    if (!data_lanes.car_to_left) {
+      states.push_back(LCL);
+    }
     //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-    states.push_back(LCR);
-    // if (!data_lanes.car_to_right) {
-    //   states.push_back(LCR);
-    // }
+    // states.push_back(LCR);
+    if (!data_lanes.car_to_right) {
+      states.push_back(LCR);
+    }
     //states.push_back(PLCR); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   map<MANEUVER_STATE, Decision> decisions;

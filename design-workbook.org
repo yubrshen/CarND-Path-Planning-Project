@@ -197,7 +197,9 @@ The v_x, v_y values can be useful for predicting where the cars will be in the f
   const double LANE_CHANGE_C= .1E4f;
   const double NEAR_ZERO = .1E-1f;
   const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
-  const double SAFE_DISTANCE = 90.0; // meters, huge number for indefinite futrue time
+  const double SAFE_DISTANCE = 150.0; // meters, huge number for indefinite futrue time
+
+  const double LANE_CHANGE_INERTIA_C = 1000.0;
 
   #endif
 #+END_SRC
@@ -326,7 +328,7 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
     data_lanes-> car_crashing_front_or_behind = false;
     data_lanes-> car_to_left                  = false;
     data_lanes-> car_to_right                 = false;
-    if (0.99 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
+    if (1.0 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
       {
       switch (my_car.lane_index - lane) {
       case 0:
@@ -948,7 +950,7 @@ Compute the decision should the maneuver is performed.
     //   }
     double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
     double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-    return cost_front + 0.7 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+    return cost_front + 1.0 * cost_behind; // might want to consider if the gap_front should have bigger weight.
   }
 #+END_SRC
 
@@ -1389,17 +1391,17 @@ The structure Decision represent all the consequence of a maneuver decision incl
     }
     // starting from 0, from the left most to the right most
     if (0 < my_car.lane_index) {// change to left lane possible
-      states.push_back(LCL);
-      // if (!data_lanes.car_to_left) {
-      //   states.push_back(LCL);
-      // }
+      // states.push_back(LCL);
+      if (!data_lanes.car_to_left) {
+        states.push_back(LCL);
+      }
       //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
     }
     if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-      states.push_back(LCR);
-      // if (!data_lanes.car_to_right) {
-      //   states.push_back(LCR);
-      // }
+      // states.push_back(LCR);
+      if (!data_lanes.car_to_right) {
+        states.push_back(LCR);
+      }
       //states.push_back(PLCR); // put PLCx after LCx in favor of LCx when the cost is equal
     }
     map<MANEUVER_STATE, Decision> decisions;
