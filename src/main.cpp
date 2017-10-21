@@ -160,20 +160,18 @@ double projected_gap_behind(double behind_s, double behind_v,
     + 0.5*front_a*(delta_t*delta_t) - VEHICLE_LENGTH;
   return gap;
 }
-double start_distance_congestion(double dist_start// , double start_time
-                                 )
+double start_distance_congestion(double dist_start)
 {
   return exp(-max(dist_start/SAFE_DISTANCE, 0.0) );
-  // * ((start_time == 0) ? 1 : start_time)
 }
 
+const double SAFE_DISTANCE_CONGESTION = start_distance_congestion(SAFE_DISTANCE);
 double threshold_congestion(double time_threshold, double start_time)
 {
-  double damper = start_distance_congestion(SAFE_DISTANCE)/exp(-start_time);
+  double damper = SAFE_DISTANCE_CONGESTION/exp(-start_time);
   // adjust the congestion for this case, to be comparable with that computed by start_distance_congestion
   // if time_threshold == start_time, then the congestion would be equal to start_distance_congestion(SAFE_DISTANCE)
-  double c = damper * exp(-time_threshold // * SAFE_DISTANCE
-                   );
+  double c = damper * exp(-time_threshold);
   return c;
 }
 
