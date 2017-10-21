@@ -625,7 +625,7 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   //   }
   double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-  return cost_front; // + cost_behind; // might want to consider if the gap_front should have bigger weight.
+  return cost_front + 0.1 * cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
