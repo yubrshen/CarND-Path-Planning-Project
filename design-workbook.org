@@ -180,7 +180,7 @@ The v_x, v_y values can be useful for predicting where the cars will be in the f
   // the length of the first portion of the remaining trajectory (previous_path)
   // from experiment, it seems 25 might be too few when the CPU is busy.
 
-  const double VELOCITY_INCREMENT_LIMIT = 0.1; // 0.125;
+  const double VELOCITY_INCREMENT_LIMIT = 0.07; // 0.125;
 
   const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
   const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
@@ -324,9 +324,9 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
      ,*/
 
     data_lanes-> car_crashing_front_or_behind = false;
-    data_lanes-> car_to_left    = false;
-    data_lanes-> car_to_right   = false;
-    if (congestion == 1) // ((0 <= congestion) && (congestion < NEARBY))
+    data_lanes-> car_to_left                  = false;
+    data_lanes-> car_to_right                 = false;
+    if (0.99 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
       {
       switch (my_car.lane_index - lane) {
       case 0:
@@ -378,7 +378,7 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
       data_lanes.lanes[i].gap_behind = SAFE_DISTANCE;
       data_lanes.lanes[i].congestion_front  = 0.0;
       data_lanes.lanes[i].congestion_behind = 0.0;
-    }
+      }
 
     CarDescription a_car;
     for (auto data:sensor_fusion)
@@ -387,7 +387,7 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
       if ((a_car.d < 0) || (lane_width*NUM_LANES < a_car.d))
         {
         continue;
-      }
+        }
       a_car.id = data[0];
       a_car.x  = data[1];
       a_car.y  = data[2];
@@ -430,21 +430,21 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
       if (!data_lanes.lanes[lane].nearest_back.empty)
         {
           cout << " back congestion: ";
-            double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
-              // shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
+          double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
+            // shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
           // my_car.s - data_lanes.lanes[lane].nearest_back.s;
-            data_lanes.lanes[lane].congestion_behind = congestion;
-            update_surronding(my_car, congestion, lane, &data_lanes);
-      }
+          data_lanes.lanes[lane].congestion_behind = congestion;
+          update_surronding(my_car, congestion, lane, &data_lanes);
+        }
       if (!data_lanes.lanes[lane].nearest_front.empty)
         {
           cout << " front congestion: ";
-            double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
-              // shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
+          double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
+            // shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
           // data_lanes.lanes[lane].nearest_front.s - my_car.s;
-            data_lanes.lanes[lane].congestion_front = congestion;
-            update_surronding(my_car, congestion, lane, &data_lanes);
-      }
+          data_lanes.lanes[lane].congestion_front = congestion;
+          update_surronding(my_car, congestion, lane, &data_lanes);
+        }
     }
     return data_lanes;
   }
@@ -485,7 +485,7 @@ It's by default 0. Only when it's bigger than the acceptable distance or sometim
          { // behind.v > front.v
            if (dist_start <= SAFE_DISTANCE)
              {
-               double punish_weight = 1.5; // punish further this case
+               double punish_weight = 1.01; // punish further this case
 
                c = punish_weight * start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
                cout <<  " start_time: " << setw(5) << start_time <<", front slower and start with less safe distance, dist_start: " << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
@@ -864,7 +864,7 @@ Compute the decision should the maneuver is performed.
       } else
       {
         return 0.0;
-    }
+      }
     // if ((SAFE_DISTANCE <= gap_front_0) &&
     //     (SAFE_DISTANCE <= gap_behind_0)) {
     //   // for the case, when there is no car in front or behind
@@ -931,11 +931,11 @@ Compute the decision should the maneuver is performed.
 
 #+NAME:buffer_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-    double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes)
-    { // express the requirements that both the gap_front and gap_behind should be
-      // larger or equal to SAFE_DISTANCE.
+  double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes)
+  { // express the requirements that both the gap_front and gap_behind should be
+    // larger or equal to SAFE_DISTANCE.
 
-      // assume gap_front and gap_behind are non-negative
+    // assume gap_front and gap_behind are non-negative
     // double cost_front = 0;
     // if (data_lanes.lanes[my_car.lane_index].gap_front < SAFE_DISTANCE)
     //   {
@@ -948,8 +948,8 @@ Compute the decision should the maneuver is performed.
     //   }
     double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
     double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-    return cost_front + 0.5 * cost_behind; // might want to consider if the gap_front should have bigger weight.
-    }
+    return cost_front + 0.7 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+  }
 #+END_SRC
 
 calculate_cost:
@@ -1238,7 +1238,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
       double start_x2  = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
       double start_y2  = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
       double start_yaw = atan2(start_y-start_y2,
-                        start_x-start_x2);
+                               start_x-start_x2);
       vector<double> frenet = getFrenet(start_x, start_y, start_yaw, waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
       start_s = frenet[0];
       start_d = frenet[1];
@@ -1283,7 +1283,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
       coarse_s_traj, coarse_x_traj, coarse_y_traj,
       interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
 
-    double prev_s = start_s - start_v * UPDATE_INTERVAL;
+    double prev_s = wrap_around(start_s - start_v * UPDATE_INTERVAL);
 
     // first two points of coarse trajectory, to ensure spline begins smoothly
     if (2 <= remaining_path_adopted_size) {
@@ -1295,7 +1295,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
       coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-1]);
       coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-1]);
     } else {
-      double prev_s = start_s - 1;
+      double prev_s = wrap_around(start_s - 1);
       double prev_x = start_x - cos(start_yaw);
       double prev_y = start_y - sin(start_yaw);
 
@@ -1309,7 +1309,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
     }
 
     // last two points of coarse trajectory, use target_d and current s + 30,60
-    double target_s1 = start_s + 30;
+    double target_s1 = wrap_around(start_s + 30);
     double target_d1 = lane_center_d(decision.lane_index_changed_to);
     vector<double> target_xy1 = getXY(target_s1, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
     double target_x1 = target_xy1[0];
@@ -1318,7 +1318,7 @@ Here is the core of the path plan, computing a series of x, y values for the sim
     coarse_x_traj.push_back(target_x1);
     coarse_y_traj.push_back(target_y1);
 
-    double target_s2 = target_s1 + 30;
+    double target_s2 = wrap_around(target_s1 + 30);
     double target_d2 = target_d1;
     vector<double> target_xy2 = getXY(target_s2, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
     double target_x2 = target_xy2[0];
@@ -1389,14 +1389,14 @@ The structure Decision represent all the consequence of a maneuver decision incl
     }
     // starting from 0, from the left most to the right most
     if (0 < my_car.lane_index) {// change to left lane possible
-        states.push_back(LCL);
+      states.push_back(LCL);
       // if (!data_lanes.car_to_left) {
       //   states.push_back(LCL);
       // }
       //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
     }
     if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-        states.push_back(LCR);
+      states.push_back(LCR);
       // if (!data_lanes.car_to_right) {
       //   states.push_back(LCR);
       // }

@@ -188,7 +188,7 @@ double congestion_f(CarDescription front, CarDescription behind, double start_ti
     { // behind.v > front.v
       if (dist_start <= SAFE_DISTANCE)
         {
-          double punish_weight = 1.5; // punish further this case
+          double punish_weight = 1.01; // punish further this case
 
           c = punish_weight * start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
           cout <<  " start_time: " << setw(5) << start_time <<", front slower and start with less safe distance, dist_start: " << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
@@ -214,7 +214,7 @@ void update_surronding(CarDescription my_car, double congestion, int lane, DATA_
   data_lanes-> car_crashing_front_or_behind = false;
   data_lanes-> car_to_left                  = false;
   data_lanes-> car_to_right                 = false;
-  if (congestion == 1) // ((0 <= congestion) && (congestion < NEARBY))
+  if (0.99 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
     {
     switch (my_car.lane_index - lane) {
     case 0:
@@ -625,7 +625,7 @@ double buffer_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_l
   //   }
   double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-  return cost_front + 0.5 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+  return cost_front + 0.7 * cost_behind; // might want to consider if the gap_front should have bigger weight.
 }
 double inefficiency_cost_f(Decision decision, CarDescription my_car, DATA_LANES data_lanes) {
   double projected_v = decision.projected_kinematics.v;
@@ -905,7 +905,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     coarse_s_traj, coarse_x_traj, coarse_y_traj,
     interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
 
-  double prev_s = start_s - start_v * UPDATE_INTERVAL;
+  double prev_s = wrap_around(start_s - start_v * UPDATE_INTERVAL);
 
   // first two points of coarse trajectory, to ensure spline begins smoothly
   if (2 <= remaining_path_adopted_size) {
@@ -917,7 +917,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
     coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-1]);
     coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-1]);
   } else {
-    double prev_s = start_s - 1;
+    double prev_s = wrap_around(start_s - 1);
     double prev_x = start_x - cos(start_yaw);
     double prev_y = start_y - sin(start_yaw);
 
@@ -931,7 +931,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
   }
 
   // last two points of coarse trajectory, use target_d and current s + 30,60
-  double target_s1 = start_s + 30;
+  double target_s1 = wrap_around(start_s + 30);
   double target_d1 = lane_center_d(decision.lane_index_changed_to);
   vector<double> target_xy1 = getXY(target_s1, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
   double target_x1 = target_xy1[0];
@@ -940,7 +940,7 @@ TRAJECTORY trajectory_f(CarDescription my_car, SENSOR_FUSION sensor_fusion, TRAJ
   coarse_x_traj.push_back(target_x1);
   coarse_y_traj.push_back(target_y1);
 
-  double target_s2 = target_s1 + 30;
+  double target_s2 = wrap_around(target_s1 + 30);
   double target_d2 = target_d1;
   vector<double> target_xy2 = getXY(target_s2, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
   double target_x2 = target_xy2[0];
