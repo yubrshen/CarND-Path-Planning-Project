@@ -140,26 +140,41 @@ struct TRAJECTORY {
 };
 
 typedef vector< vector<double> > SENSOR_FUSION;
-// double projected_gap(Car front, Car behind, double delta_t = UPDATE_INTERVAL) {
-//     // ignore accelerations, assuming they are 0, to simplify
-//     return front.s - behind.s + (front.v - behind.v)*delta_t - VEHICLE_LENGTH;
-//   }
-
 double projected_gap_front(double front_s, double front_v,
                            double behind_s, double behind_v, double behind_a,
-                           double delta_t) {
+                           double delta_t)
+{
   double gap = front_s - behind_s + (front_v - behind_v)*delta_t +
-    - 0.5*behind_a*(delta_t*delta_t) - VEHICLE_LENGTH;
+    - 0.5*behind_a*(delta_t * delta_t) - VEHICLE_LENGTH;
   return gap;
 }
 
 double projected_gap_behind(double behind_s, double behind_v,
                             double front_s, double front_v, double front_a,
-                            double delta_t) {
+                            double delta_t)
+{
   double gap = front_s - behind_s + (front_v - behind_v)*delta_t +
-    + 0.5*front_a*(delta_t*delta_t) - VEHICLE_LENGTH;
+    + 0.5*front_a*(delta_t * delta_t) - VEHICLE_LENGTH;
   return gap;
 }
+void update_gaps_in_kinematic(Car front, Car my_car, Car behind,
+                              double horizon, KINEMATIC_DATA *kinematic)
+{
+  kinematic->horizon = horizon;
+  if (behind.empty) {
+    kinematic->gap_behind = SAFE_DISTANCE; // extremely large
+  } else {
+    kinematic->gap_behind =
+      projected_gap_behind(behind.s, behind.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
+  }
+  if (front.empty) {
+    kinematic->gap_front = SAFE_DISTANCE; // extremely large
+  } else {
+    kinematic->gap_front =
+      projected_gap_front(front.s, front.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
+  }
+}
+
 double start_distance_congestion(double dist_start)
 {
   return exp(-max(dist_start/SAFE_DISTANCE, 0.0) );
@@ -169,8 +184,10 @@ const double SAFE_DISTANCE_CONGESTION = start_distance_congestion(SAFE_DISTANCE)
 double threshold_congestion(double time_threshold, double start_time)
 {
   double damper = SAFE_DISTANCE_CONGESTION/exp(-start_time);
-  // adjust the congestion for this case, to be comparable with that computed by start_distance_congestion
-  // if time_threshold == start_time, then the congestion would be equal to start_distance_congestion(SAFE_DISTANCE)
+  // adjust the congestion for this case,
+  // to be comparable with that computed by start_distance_congestion
+  // if time_threshold == start_time,
+  // then the congestion would be equal to start_distance_congestion(SAFE_DISTANCE)
   double c = damper * exp(-time_threshold);
   return c;
 }
@@ -183,22 +200,27 @@ double congestion_f(Car front, Car behind, double start_time, double end_time)
   if (behind.v <= front.v)
     {
       c = start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
-      cout << " start_time: " << setw(5) << start_time << ", front faster, dist_start: " << setw(7) << dist_start << " c: " << setw(7) << c << "; ";
+      cout << " start_time: " << setw(5) << start_time << ", front faster, dist_start: "
+           << setw(7) << dist_start << " c: " << setw(7) << c << "; ";
     } else
     { // behind.v > front.v
       if (dist_start <= SAFE_DISTANCE)
         {
           double punish_weight = 1.01; // punish further this case
 
-          c = punish_weight * start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
-          cout <<  " start_time: " << setw(5) << start_time <<", front slower and start with less safe distance, dist_start: " << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
+          c = punish_weight * start_distance_congestion(dist_start);
+          cout <<  " start_time: " << setw(5) << start_time
+               << ", front slower and start with less safe distance, dist_start: "
+               << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
         } else
         { // dist_start > SAFE_DISTANCE
           // with equation:
           // dist = (front.s - behind.s) + (front.v - behind.v)* t = SAFE_DISTANCE
+          // time_threshold should be when the projected distance between the front and the behind
+          // would equal to SAFE_DISTANCE
           double time_threshold = (SAFE_DISTANCE - (front.s - behind.s)) / (front.v - behind.v);
-          cout << "front slower, and start wtih more than safe distance, time_threshold: " << setw(7) << time_threshold << " c: " << setw(7) << c <<"; ";
-
+          cout << "front slower, and start wtih more than safe distance, time_threshold: "
+               << setw(7) << time_threshold << " c: " << setw(7) << c <<"; ";
           assert(start_time <= time_threshold); // by the model's reasoning
           c = threshold_congestion(time_threshold, start_time);
         }
@@ -210,11 +232,10 @@ void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data
     Based on the distance between the car in front, and that behind, congestion to determine the car's
     status, represented in the fields of DATA_LANES: car_crashing_front_or_behind, car_to_left, car_to_right.
    */
-
   data_lanes-> car_crashing_front_or_behind = false;
   data_lanes-> car_to_left                  = false;
   data_lanes-> car_to_right                 = false;
-  if (0.899 < congestion) // ((0 <= congestion) && (congestion < NEARBY))
+  if (0.899 < congestion)
     {
     switch (my_car.lane_index - lane) {
     case 0:
@@ -227,33 +248,16 @@ void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data
       data_lanes->car_to_right = true;
     default:
       break;
-    }} else {
+    }} else
+    {
     // cout <<"car_{right, left, ahead}: " << data_lanes->car_to_right << ", " << data_lanes->car_to_left << ", " << data_lanes->car_crashing_front_or_behind;
-  }
-}
-
-// Try to avoid division, but use similar logic, to simplify the model
-// To work out,
-
-// The following should change to buffer_coefficient_f
-
-double shortest_distance(Car front, Car behind, double start_time, double end_time)
-{ // compute the shortest distance between the car in front and the behind from start_time to end_time.
-  // To simplify, assume they have zero acceleration
-  double dist;
-  if (front.v <= behind.v)
-    {// the shortest distance would be at the end_time, with the distance will decrease from the start_time to end_time
-      dist = (front.s - behind.s) + (front.v - behind.v)*end_time;
-    } else
-    { // the shortest would be at the start_time
-      dist = (front.s - behind.s) + (front.v - behind.v)*start_time;
     }
-  return max(dist, 0.0); // ensure that it's non-negative. when it's negative, it's already way too close.
 }
 
 DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double start_time, double end_time)
-{ // find the nearest car in front, and behind, and find the smallest (worst) distance with my_car in the time period
-  // defined by start and end.
+{ /* find the nearest car in front, and behind, and find the congestion conditions in front of my_car, and behind
+     for the time period of start_time and end_time.
+  */
 
   DATA_LANES data_lanes;
   for (int i = 0; i < NUM_LANES; i++)
@@ -271,30 +275,32 @@ DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double sta
   Car a_car;
   for (auto data:sensor_fusion)
     { // find the nearest in front and behind
-    a_car.d  = data[6];
+    a_car.d     = data[6];
     if ((a_car.d < 0) || (lane_width*NUM_LANES < a_car.d))
       {
-      continue;
+      continue;                 // ignore invalid record
       }
-    a_car.id = data[0];
-    a_car.x  = data[1];
-    a_car.y  = data[2];
-    a_car.v_x = data[3];
-    a_car.v_y = data[4];
-    a_car.s  = data[5];
+    a_car.id    = data[0];
+    a_car.x     = data[1];
+    a_car.y     = data[2];
+    a_car.v_x   = data[3];
+    a_car.v_y   = data[4];
+    a_car.s     = data[5];
 
     a_car.lane_index = d_to_lane_index(a_car.d);
-    a_car.v = sqrt(pow(a_car.v_x, 2) + pow(a_car.v_y, 2));
+    a_car.v     = sqrt(pow(a_car.v_x, 2) +
+                       pow(a_car.v_y, 2));
     a_car.empty = false;
 
     // cout << "a car at lane: " << a_car.lane_index;
+    // Find the nearest cars in front of my_car, and behind:
     if (a_car.s <= my_car.s) {// there is a car behind
       if (data_lanes.lanes[a_car.lane_index].nearest_back.empty) {
         // cout << ", first registration for nearest_back ";
-        data_lanes.lanes[a_car.lane_index].nearest_back       = a_car;
+        data_lanes.lanes[a_car.lane_index].nearest_back        = a_car;
       } else {
         if (data_lanes.lanes[a_car.lane_index].nearest_back.s < a_car.s) {
-          data_lanes.lanes[a_car.lane_index].nearest_back = a_car;
+          data_lanes.lanes[a_car.lane_index].nearest_back      = a_car;
           // cout << ", update for nearest_back ";
         }}}
     if (my_car.s <= a_car.s) { // there is a car in front
@@ -304,8 +310,9 @@ DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double sta
       } else {
         if (a_car.s < data_lanes.lanes[a_car.lane_index].nearest_front.s) {
           // cout << ", update for nearest_back ";
-          data_lanes.lanes[a_car.lane_index].nearest_front = a_car;
+          data_lanes.lanes[a_car.lane_index].nearest_front     = a_car;
         }}}}
+
   // For only the legal lanes adjacent to my_car.lane_index,
   int left_lane  = my_car.lane_index -1;
   int right_lane = my_car.lane_index +1;
@@ -319,8 +326,6 @@ DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double sta
       {
         cout << " back congestion: ";
         double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
-          // shortest_distance(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
-        // my_car.s - data_lanes.lanes[lane].nearest_back.s;
         data_lanes.lanes[lane].congestion_behind = congestion;
         update_surronding(my_car, congestion, lane, &data_lanes);
       }
@@ -328,8 +333,6 @@ DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double sta
       {
         cout << " front congestion: ";
         double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
-          // shortest_distance(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
-        // data_lanes.lanes[lane].nearest_front.s - my_car.s;
         data_lanes.lanes[lane].congestion_front = congestion;
         update_surronding(my_car, congestion, lane, &data_lanes);
       }
@@ -355,76 +358,8 @@ typename T::iterator min_map_element(T& m) {
 
 
 
-void update_gaps_in_kinematic(Car front, Car my_car, Car behind,
-                              double horizon, KINEMATIC_DATA *kinematic) {
-  kinematic->horizon = horizon;
-  if (behind.empty) {
-    kinematic->gap_behind = SAFE_DISTANCE; // extremely large
-  } else {
-    kinematic->gap_behind =
-      projected_gap_behind(behind.s, behind.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
-  }
-  if (front.empty) {
-    kinematic->gap_front = SAFE_DISTANCE; // extremely large
-  } else {
-    kinematic->gap_front =
-      projected_gap_front(front.s, front.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
-  }
-}
 
-const double SPEED_ADJUSTMENT_PERIOD = 30; // seconds
-double const ONE_OVER_ADJUSTMENT_INTERVAL_SQUARE =
-  1/(SPEED_ADJUSTMENT_PERIOD * SPEED_ADJUSTMENT_PERIOD);
-double const ONE_OVER_ADJUSTMENT_INTERVAL = 1/SPEED_ADJUSTMENT_PERIOD;
 
-// KINEMATIC_DATA kinematic_required_in_front
-// (Car my_car, DATA_LANES data_lanes, int lane_changed_to) {
-//   KINEMATIC_DATA kinematic;
-//   // double acceleration;
-//   double extra_speed_allowed = SPEED_LIMIT - my_car.v;
-//   double speed_limit_allowed_acceleration =
-//     extra_speed_allowed * ONE_OVER_ADJUSTMENT_INTERVAL;
-//   double feasible_acceleration;
-//   // double target_v = SPEED_LIMIT;
-
-//   if (data_lanes.lanes[lane_changed_to].nearest_front.empty) {
-//     feasible_acceleration = speed_limit_allowed_acceleration;
-//     // effective no consideration of the car in frontfs
-//   } else {
-//     double gap_front = data_lanes.lanes[lane_changed_to].nearest_front.s - my_car.s;
-//       // data_lanes.lanes[lane_changed_to].gap_front;
-//     double available_room = gap_front - BUFFER_ZONE;
-//     feasible_acceleration =
-//       available_room * ONE_OVER_ADJUSTMENT_INTERVAL_SQUARE - my_car.v * ONE_OVER_ADJUSTMENT_INTERVAL;
-//   }
-//   if (feasible_acceleration <= 0) {
-//     kinematic.a = feasible_acceleration;
-//     // collision is happening at the time, deceleration immediately
-//     // The time is at the end of the adopted remaining trajectory, and
-//     // the start of new planned trajectory
-//   } else { // 0 < feasible_acceleration
-//     if (speed_limit_allowed_acceleration < 0) { // speeding over limit
-//       double acceleration_delta
-//         = min(fabs(my_car.a - speed_limit_allowed_acceleration),
-//               MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-//       kinematic.a = my_car.a - acceleration_delta;
-//     } else { // 0 <= speed_limit_allowed_acceleration and 0 < feasible_acceleration
-//       kinematic.a
-//         = min(min(speed_limit_allowed_acceleration,
-//                              feasible_acceleration),
-//               my_car.a + MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-//     }}
-//   // Consider the sensed car in front may not be far away
-//   // The Ego's speed shall be at most than that of the car in front
-//   kinematic.v = min(data_lanes.lanes[lane_changed_to].nearest_front.v,
-//                  my_car.v + kinematic.a * UPDATE_INTERVAL); // kinematic.v is used per UPDATE_INTERVAL
-
-//   update_gaps_in_kinematic(data_lanes.lanes[lane_changed_to].nearest_front,
-//                            my_car,
-//                            data_lanes.lanes[lane_changed_to].nearest_back,
-//                            10*UPDATE_INTERVAL, &kinematic);
-//   return kinematic;
-// }
 KINEMATIC_DATA kinematic_required_in_front
 (Car my_car, DATA_LANES data_lanes, int lane_changed_to) {
   KINEMATIC_DATA kinematic;
@@ -435,12 +370,11 @@ KINEMATIC_DATA kinematic_required_in_front
     = data_lanes.lanes[lane_changed_to].nearest_front.s
     + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
   double gap_front = projected_front_car_s - projected_my_car_s;
-  if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE)) {
-    kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
-  }
-  // if (data_lanes.car_crashing_front_or_behind) {
-  //   kinematic.v = 0.0;
-  // }
+  if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
+  //if (0.3 < data_lanes.lanes[lane_changed_to].congestion_front)
+    {
+      kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
+    }
   kinematic.a = (kinematic.v - my_car.v)/kinematic.horizon;
   return kinematic;
 }
@@ -670,72 +604,29 @@ Decision maneuver(Car my_car, DATA_LANES data_lanes) {
   }
   // starting from 0, from the left most to the right most
   if (0 < my_car.lane_index) {// change to left lane possible
-    // states.push_back(LCL);
     if (!data_lanes.car_to_left) {
       states.push_back(LCL);
     }
-    //states.push_back(PLCL); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   if (my_car.lane_index < NUM_LANES-1) { // change to right lane possible
-    // states.push_back(LCR);
     if (!data_lanes.car_to_right) {
       states.push_back(LCR);
     }
-    //states.push_back(PLCR); // put PLCx after LCx in favor of LCx when the cost is equal
   }
   map<MANEUVER_STATE, Decision> decisions;
   for (auto proposed_state:states) {
     Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-    cout << setw(5) << state_str(proposed_state) << ", cost: " << setw(5) <<  a_decision.cost << " | ";
+    cout << setw(5) << state_str(proposed_state) << ", cost: "
+         << setw(5) <<  a_decision.cost << " | ";
     decisions[proposed_state] = a_decision;
   }
 
   Decision decision = min_map_element(decisions)->second;
-  // if ((decision.maneuver != KL) && decisions[KL].cost == decisions[decision.maneuver].cost) {
-  //   decision = decisions[KL];
-  // }
-  cout << "Sel. man.: "  << setw(5) << state_str(decision.maneuver); // << ", cost: " << setw(7) << decision.cost << " ";
+  cout << "Sel. man.: "  << setw(5) << state_str(decision.maneuver);
+  // << ", cost: " << setw(7) << decision.cost << " ";
   cout << endl; // end of displaying cost evaluations
   return decision;
 }
-
-// for (size_t i = 0; i < sensor_fusion.size(); i++) {
-//   // car in in my lane
-//   float d = sensor_fusion[i][6];
-//   // the format of sensor_fusion data: vector of vector of id, x, y, v_x, v_y, s, d
-//   if (within_lane(lane_index, d)) {
-//     double v_x = sensor_fusion[i][3];
-//     double v_y = sensor_fusion[i][4];
-//     double another_car_speed = sqrt(v_x*v_x + v_y*v_y);
-//     double another_car_projected_s =
-//       (double)sensor_fusion[i][5] + ((double)remaining_path_adopted_size*UPDATE_INTERVAL*another_car_speed);
-//     // the position of the other car in the slight future
-//     if ((car_s < another_car_projected_s) &&
-//         ((another_car_projected_s - car_s) < 30)) {
-//       // the other car is in front, and too close, within 30 meters distance
-//       // lower reference velocity so my car dosen't crash into the car in front
-//       // could flag to try to change lane
-//       // ref_val = 29.5; // mph
-//       too_close = true;
-
-//       if (lane_index > 0) {
-//         lane_index = 0;
-//       }
-//     }
-//   }
-//  }
-// // end of rear collision
-
-// // incremental acceleration/deacceleration
-
-// if (too_close && (0 < ref_val)) {
-//   ref_val -= 0.224; // roughly equivalent to deacceleration 5m/s^2
-//   // cout << "ref_val: " << ref_val << endl;
-//  } else if (ref_val < SPEED_LIMIT) {
-//   ref_val += 0.224; // roughly equivalent to acceleration 5m/s^2
-//   // cout << "ref_val: " << ref_val << endl;
-//  }
-// // end of acceleration/deacceleration
 
 struct WAYPOINTS_MAP {
   vector<double> _x;
@@ -827,8 +718,9 @@ WAYPOINTS_MAP refine_maps_f(Car my_car, vector<double> map_waypoints_x, vector<d
 // Next to resolve the compilation dependency.
 
 TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY remaining_trajectory,
-                        WAYPOINTS_MAP waypoints_maps) {
-  TRAJECTORY trajectory; // the output
+                        WAYPOINTS_MAP waypoints_maps)
+{
+  TRAJECTORY trajectory; // the return value
 
   int remaining_path_adopted_size =
     min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
@@ -850,7 +742,6 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
   double start_yaw = my_car.yaw;
   double start_v   = my_car.v;
   double start_d   = my_car.d;
-  double start_d_dot = 0;
 
   // modulate the start values of trajectory by the remaining trajectory:
   if (2 <= remaining_path_adopted_size) {
@@ -863,6 +754,7 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
                              start_x-start_x2);
     vector<double> frenet = getFrenet(start_x, start_y, start_yaw, waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
     start_s = frenet[0];
+    start_s = wrap_around(start_s); // maybe needed
     start_d = frenet[1];
 
     // determine dx, dy vector from set of interpoated waypoints, with start_x, start_y as reference point;
@@ -883,17 +775,6 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
     // want projection of xy velocity vector (V) onto S (sx,sy) and D (dx,dy) vectors, and since S
     // and D are unit vectors this is simply the dot products of V with S and V with D
     start_v = vel_x1 * sx + vel_y1 * sy;
-    start_d_dot = vel_x1 * dx + vel_y1 * dy;
-
-    // have to get another point to calculate s_ddot, d_ddot from xy acceleration
-    // start_x3 = remaining_trajectory.x_vals[remaining_path_adopted_size-3];
-    // start_y3 = remaining_trajectory.y_vals[remaining_path_adopted_size-3];
-    // vel_x2 = (start_x2 - start_x3) / UPDATE_INTERVAL;
-    // vel_y2 = (start_y2 - start_y3) / UPDATE_INTERVAL;
-    // acc_x = (vel_x1 - vel_x2) / UPDATE_INTERVAL;
-    // acc_y = (vel_y1 - vel_y2) / UPDATE_INTERVAL;
-    // s_ddot = acc_x * sx + acc_y * sy;
-    // d_ddot = acc_x * dx + acc_y * dy;
   }
 
   // ********************* PRODUCE NEW PATH ***********************
@@ -901,71 +782,144 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
   // spline the last point should be the first point in the returned trajectory, but because of
   // imprecision, also add that point manually
 
-  vector<double>
-    coarse_s_traj, coarse_x_traj, coarse_y_traj,
-    interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
-
   double prev_s = wrap_around(start_s - start_v * UPDATE_INTERVAL);
+  int smallest_start_index = 0; // default 0
+  if (start_s < prev_s)
+    {
+      smallest_start_index = 1;
+      cout << "start_s <= prev_s start_s | prev_s: " << start_s << "|" << prev_s << "; ";
+    }
+  double prev_x, prev_y;
 
   // first two points of coarse trajectory, to ensure spline begins smoothly
   if (2 <= remaining_path_adopted_size) {
-    coarse_s_traj.push_back(prev_s);
-    coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
-    coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
+    // coarse_s_traj.push_back(prev_s);
+    // coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
+    prev_x = (remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
+    // coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
+    prev_y = (remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
 
-    coarse_s_traj.push_back(start_s);
-    coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-1]);
-    coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-1]);
+    // coarse_s_traj.push_back(start_s);
+    // coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-1]);
+    // coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-1]);
   } else {
-    double prev_s = wrap_around(start_s - 1);
-    double prev_x = start_x - cos(start_yaw);
-    double prev_y = start_y - sin(start_yaw);
+    prev_s = wrap_around(start_s - 1);
+    prev_x = start_x - cos(start_yaw);
+    prev_y = start_y - sin(start_yaw);
 
-    coarse_s_traj.push_back(prev_s);
-    coarse_x_traj.push_back(prev_x);
-    coarse_y_traj.push_back(prev_y);
+    // coarse_s_traj.push_back(prev_s);
+    // coarse_x_traj.push_back(prev_x);
+    // coarse_y_traj.push_back(prev_y);
 
-    coarse_s_traj.push_back(start_s);
-    coarse_x_traj.push_back(start_x);
-    coarse_y_traj.push_back(start_y);
+    // coarse_s_traj.push_back(start_s);
+    // coarse_x_traj.push_back(start_x);
+    // coarse_y_traj.push_back(start_y);
   }
 
   // last two points of coarse trajectory, use target_d and current s + 30,60
-  double target_s1 = wrap_around(start_s + 30);
+  double target_1_s = (start_s + 30);
+  if (MAX_S <= target_1_s)
+    {
+      smallest_start_index = 2;
+      target_1_s -= MAX_S;
+    }
   double target_d1 = lane_center_d(decision.lane_index_changed_to);
-  vector<double> target_xy1 = getXY(target_s1, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-  double target_x1 = target_xy1[0];
-  double target_y1 = target_xy1[1];
-  coarse_s_traj.push_back(target_s1);
-  coarse_x_traj.push_back(target_x1);
-  coarse_y_traj.push_back(target_y1);
+  vector<double> target_xy1 = getXY(target_1_s, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
+  double target_1_x = target_xy1[0];
+  double target_1_y = target_xy1[1];
 
-  double target_s2 = wrap_around(target_s1 + 30);
+  // coarse_s_traj.push_back(target_1_s);
+  // coarse_x_traj.push_back(target_1_x);
+  // coarse_y_traj.push_back(target_1_y);
+
+  double target_2_s = (target_1_s + 30);
+  if (MAX_S <= target_2_s)
+    {
+      smallest_start_index = 3;
+      target_2_s -= MAX_S;
+    }
   double target_d2 = target_d1;
-  vector<double> target_xy2 = getXY(target_s2, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-  double target_x2 = target_xy2[0];
-  double target_y2 = target_xy2[1];
-  coarse_s_traj.push_back(target_s2);
-  coarse_x_traj.push_back(target_x2);
-  coarse_y_traj.push_back(target_y2);
+  vector<double> target_xy2 = getXY(target_2_s, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
+  double target_2_x = target_xy2[0];
+  double target_2_y = target_xy2[1];
+
+  // coarse_s_traj.push_back(target_2_s);
+  // coarse_x_traj.push_back(target_2_x);
+  // coarse_y_traj.push_back(target_2_y);
+
+  vector<double> coarse_s_traj, coarse_x_traj, coarse_y_traj;
+
+  // arrange the seeding trajectory points to ensure coarse_s_traj has increasing order
+  map<string, map<string, double> > seeds =
+    {
+      {"prev",     {{"s", prev_s},     {"x", prev_x},     {"y", prev_y}}},
+      {"start",    {{"s", start_s},    {"x", start_x},    {"y", start_y}}},
+      {"target_1", {{"s", target_1_s}, {"x", target_1_x}, {"y", target_1_y}}},
+      {"target_2", {{"s", target_2_s}, {"x", target_2_x}, {"y", target_2_y}}}
+    };
+  map<string, vector<double>* > trajs =
+    {
+      {"s", &coarse_s_traj},
+      {"x", &coarse_x_traj},
+      {"y", &coarse_y_traj}
+    };
+
+  for (string sxy: {"s", "x", "y"})
+    {
+      cout << "case : " << smallest_start_index << "; ";
+
+      cout << "re-arranged: ";
+      switch (smallest_start_index)
+        {
+        case 0:
+          for (string p: {"prev", "start", "target_1", "target_2"})
+            {
+              trajs[sxy]->push_back(seeds[p][sxy]);
+            }
+          break;
+        case 1:
+          for (string p: {"start", "target_1", "target_2", "prev"})
+            {
+              cout << seeds[p][sxy] << ", ";
+              trajs[sxy]->push_back(seeds[p][sxy]);
+            }
+          break;
+        case 2:
+          for (string p: {"target_1", "target_2", "prev", "start"})
+            {
+              trajs[sxy]->push_back(seeds[p][sxy]);
+            }
+          break;
+        case 3:
+          for (string p: {"target_2", "prev", "start", "target_1"})
+            {
+              trajs[sxy]->push_back(seeds[p][sxy]);
+            }
+          break;
+        default:
+          cout << "Illegal index of the smallest s value. ";
+        }
+    }
+  cout << " coarse_s_traj.size(): " << coarse_s_traj.size() << "; " << endl;
 
   // next s values
+  vector<double> interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
   double target_v = decision.projected_kinematics.v; // best_target[0][1];
   double next_s = start_s;
-  double prev_updated_s = -MAX_S; // impossibly small
+  // double prev_updated_s = -MAX_S; // impossibly small
 
   double next_v = start_v;
   const double VELOCITY_INCREMENT_LIMIT = 0.125;
-  cout << " next_v: ";
+  // cout << " next_v: ";
   for (int i = 0; i < new_traj_size; i++) {
     double v_incr = 0;
     next_s += next_v * UPDATE_INTERVAL;
     // prevent non-increasing s values:
     next_s = wrap_around(next_s);
-    if (next_s <= prev_updated_s)
-      break;
-    prev_updated_s = next_s;
-    cout << setw(5) << next_v << ", ";
+    // if (next_s <= prev_updated_s)
+    //   break;
+    // prev_updated_s = next_s;
+    // cout << setw(5) << next_v << ", ";
     interpolated_s_traj.push_back(next_s);
     if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
       v_incr = 0;
@@ -975,12 +929,18 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
     }
     next_v += v_incr;
   }
+  cout << " coarse_s_traj: ";
+  for (auto s: coarse_s_traj)
+    {
+      cout << s << ", ";
+    }
+  cout << endl;
 
   interpolated_x_traj = interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);
   interpolated_y_traj = interpolate_points(coarse_s_traj, coarse_y_traj, interpolated_s_traj);
 
   // add previous path, if any, to next path
-  // Start with all of the previous path points from last time
+  // Start with the adopted portion of the previous path points from last time
   for (int i = 0; i < remaining_path_adopted_size; i++) {
     trajectory.x_vals.push_back(remaining_trajectory.x_vals[i]);
     trajectory.y_vals.push_back(remaining_trajectory.y_vals[i]);
@@ -1070,87 +1030,65 @@ int main() {
             // Sensor Fusion Data, a list of all other cars on the same side of the road.
             auto sensor_fusion = j[1]["sensor_fusion"];
         
+            ios::fmtflags old_settings = cout.flags();
+            cout.precision(5);
+            
             cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
             
-                // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-                // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-                // << endl;
+            // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+            // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            // << endl;
             
-                // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-                //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-                //      << endl;
+            // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+            //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            //      << endl;
+            // Assemble information to call trajectory_f:
+            my_car.id = -1; // hopefully impossible id of the other cars
+            my_car.x  = car_x;
+            my_car.y  = car_y;
+            my_car.yaw = deg2rad(car_yaw);
             
+            double old_v = my_car.v;
+            my_car.v  = mph_2_meterps(car_speed);
+            my_car.s  = wrap_around(car_s);
+            my_car.d  = car_d;
+            my_car.lane_index = d_to_lane_index(car_d);
             
-              // Assemble information to call trajectory_f:
-              my_car.id = -1; // hopefully impossible id of the other cars
-              my_car.x  = car_x;
-              my_car.y  = car_y;
-              my_car.yaw = deg2rad(car_yaw);
+            double old_a = my_car.a;
+            my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
             
-              double old_v = my_car.v;
-              my_car.v  = mph_2_meterps(car_speed);
-              my_car.s  = wrap_around(car_s);
-              my_car.d  = car_d;
-              my_car.lane_index = d_to_lane_index(car_d);
+            my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
             
-              double old_a = my_car.a;
-              my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
+            my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
+            my_car.remaining_path_end_d = remaining_path_end_d;
             
-              my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
+            TRAJECTORY remaining_trajectory;
+            // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
+            // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
+            // the vector assginment.
+            // cout << endl;
+            // cout << "remaining x: ";
+            for (auto x:remaining_path_x) {
+              remaining_trajectory.x_vals.push_back(x);
+              // cout << setw(6) << x << ", ";
+             }
             
-              my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
-              my_car.remaining_path_end_d = remaining_path_end_d;
+            //cout << endl;
+            //cout << "remaining y: ";
+            for (auto y:remaining_path_y) {
+              remaining_trajectory.y_vals.push_back(y);
+              // cout << setw(6) << y << ", ";
+             }
             
-              ios::fmtflags old_settings = cout.flags();
-              cout.precision(5);
+            // cout << endl;
             
-              TRAJECTORY remaining_trajectory;
-              // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
-              // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
-              // the vector assginment.
-              // cout << endl;
-              // cout << "remaining x: ";
-              for (auto x:remaining_path_x) {
-                remaining_trajectory.x_vals.push_back(x);
-                // cout << setw(6) << x << ", ";
-               }
+            // Fix and refine the waypoint maps to improve the resolution of computing
             
-              //cout << endl;
-              //cout << "remaining y: ";
-              for (auto y:remaining_path_y) {
-                remaining_trajectory.y_vals.push_back(y);
-                // cout << setw(6) << y << ", ";
-               }
-            
-              // cout << endl;
-            
-              // remaining_trajectory.x_vals = remaining_path_x;
-              // remaining_trajectory.y_vals = remaining_path_y;
-            
-              // Fix and refine the waypoint maps to improve the resolution of computing
-              // ref_v based on the remaining trajectory, for smoother trajectory planning.
-            
-              WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
+            WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
                                                        map_waypoints_x, map_waypoints_y, map_waypoints_s,
                                                        map_waypoints_dx, map_waypoints_dy);
-              TRAJECTORY trajectory
-              = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
-            
-              // // Define the actual (x, y) points in the planner
-              // vector<double> next_x_vals;
-              // vector<double> next_y_vals;
-            // cout << endl;
-            // cout << "planned traj. sent to simulator" << endl;
-            // cout << "x: ";
-            // for (auto x:trajectory.x_vals) {
-            //   cout << setw(6) << x << ", ";
-            // }
-            // cout << endl;
-            // cout << "y: ";
-            // for (auto y:trajectory.y_vals) {
-            //   cout << setw(6) << y << ", ";
-            // }
-            // cout << endl;
+            TRAJECTORY trajectory
+            = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
         
             json msgJson;
             msgJson["next_x"] = trajectory.x_vals;

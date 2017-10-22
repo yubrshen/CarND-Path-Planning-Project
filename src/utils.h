@@ -75,16 +75,17 @@
   }
 
   double wrap_around(double s) {
-    double new_s = 0;
-    if (s < 0)
-      new_s = remainder(s, MAX_S);
-    // new_s = s - q*MAX_S, where q = cell(s/MAX_S), so when s < 0, q*MAX_S <= s, thus 0 <= s - q*MAX_S
-    else
-      new_s = fmod(s, MAX_S);
-    // new_s = s - q*MAX_S, where q = floor(s/MAX_S), so when 0 < s, q*MAX_S <= s, 0 <= s - q*MAX_S
-    assert(0 <= new_s);
-    assert(new_s < MAX_S);
-    return new_s;
+    while (s < 0)
+      {
+        s += MAX_S;
+      }
+    while (MAX_S <= s)
+      {
+        s -= MAX_S;
+      }
+    assert(0 <= s);
+    assert(s < MAX_S);
+    return s;
   }
 
   int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> maps_y)
