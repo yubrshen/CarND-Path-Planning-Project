@@ -13,9 +13,11 @@ With this style of narrative, key chunks of code relevant to higher level design
 much more thought process presented. This would make the source code much more understandable, removing the challenges of providing
 updated and appropriate comments to the source code.
 
-The full source code can be generated from this literate programming document: <./design-workbook.md>
-
 In this design document, "my\_car" refers to the car being controlled by the path planner.
+
+The full source code can be generated from this literate programming document: <./design-workbook.md>
+While the files with same name with different suffix of "pdf" and "md" are equivalent, but may not be as updated.
+The PDF file may have better readability.
 
 There is a companion design-workbook for the utilities used in the implementation: <./utils.md>
 
@@ -489,6 +491,10 @@ We use the generated s sequence access the two spline functions to get the corre
 then the x, y value pair would be the expected additional trajectory.
 
 Finally, we join the adopted portion of the remaining trajectory and the newly generated trajectory.
+
+I learned the idea of using s series as the device to space the the x, y values to produce trajectory with proper velocity behavior from
+<https://github.com/jeremy-shannon/CarND-Path-Planning-Project>
+his code for interpolate\_points is borrowed.
 
 `trajectory`:
 
