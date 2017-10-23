@@ -1,8 +1,7 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
 
-To review my design and implementation of the path planning project, please read [Design Workbook](./design-workbook.md) 
-Alternatively, you can read the [original source](design-workbook.org) 
+To review my design and implementation of the path planning project, please read [original source](design-workbook.org) 
 
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases).

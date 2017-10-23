@@ -518,6 +518,10 @@ then the x, y value pair would be the expected additional trajectory.
 
 Finally, we join the adopted portion of the remaining trajectory and the newly generated trajectory.
 
+I learned the idea of using s series as the device to space the the x, y values to produce trajectory with proper velocity behavior from
+https://github.com/jeremy-shannon/CarND-Path-Planning-Project
+his code for interpolate_points is borrowed.
+
 #+NAME:trajectory
 #+BEGIN_SRC C++ :noweb tangle :tangle
   TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion,

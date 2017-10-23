@@ -17,6 +17,12 @@ This is the code to be seperated from the main.cpp to be more modular.
 
 This header file contains implementations.
 
+The functions of interpolate_points are from
+https://github.com/jeremy-shannon/CarND-Path-Planning-Project
+
+The functions of NextWaypoint, ClosestWaypoint, hasData are from Udacity.
+
+
 #+NAME:utils-h
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/utils.h :main no
     #ifndef UTILS
@@ -160,7 +166,7 @@ This header file contains implementations.
    the total length of the circle drive, MAX_S, then wrap it around.
 
 #+NAME:wrap_around
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double wrap_around(double s) {
     while (s < 0)
       {
@@ -178,7 +184,7 @@ This header file contains implementations.
 
 ** lane_judgment
 #+NAME:lane_judgment
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   int lane_width = 4;
   // starting from 0, from the left most to the right most
   int lane_center_d(int lane_index) {
@@ -213,7 +219,7 @@ This header file contains implementations.
    - NextWaypoint: the next waypoint relative to the point (x, y) in terms of the index of waypoints, using ClosestWaypoint.
 
 #+NAME:NextWaypoint
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb yes :tangle
   double distance(double x1, double y1, double x2, double y2) {
     return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
   }
@@ -260,7 +266,7 @@ This header file contains implementations.
     - getXY: from Frenet to Cartesian
 
 #+NAME:coordinates_conversation
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb yes :tangle
   // Transform from Cartesian x, y coordinates to Frenet s, d coordinates
   vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y) {
     /*
@@ -338,7 +344,7 @@ This header file contains implementations.
 #+END_SRC
 ** hasData
 #+NAME:hasData
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb yes :tangle
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
@@ -357,7 +363,7 @@ string hasData(string s) {
 * NextWaypoint (old, suggested to have bug)
 
 #+NAME:old-next-waypoint
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
   {
     int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
@@ -378,7 +384,7 @@ string hasData(string s) {
   Based on https://discussions.udacity.com/t/2-bugs-in-code-provided-in-nextwaypoint/397364
 
 #+NAME:next-waypoint
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   //int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
   int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
   {
@@ -407,7 +413,7 @@ string hasData(string s) {
 
     Support function for cost functions
 #+NAME:logistic
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double logistic(double x) {
     // returns a value between 0 and 1 for x in the range[0, infinity] and
     // - 1 to 0 for x in the range[-infinity, infinity].
@@ -418,7 +424,7 @@ string hasData(string s) {
 * interpolate_points_function
 
 #+NAME:interpolate_points_function
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+    #+BEGIN_SRC C++ :noweb tangle :tangle
   vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
                                     vector<double> eval_at_x) {
     // uses the spline library to interpolate points connecting a series of x and y values
@@ -460,7 +466,7 @@ string hasData(string s) {
 * support-to-maneuver
 
 #+NAME:support-to-maneuver
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   template <typename T>
   void vector_remove(vector<T> & a_vector, T value) {
     a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
