@@ -48,7 +48,7 @@ const double LANE_CHANGE_C= .1E4f;
 // const double DESIRED_TIME_BUFFER = 10; // seconds,
 // according to http://copradar.com/redlight/factors/ ;
 // change from 30 to 10 for better differentiation
-const double SAFE_DISTANCE = 120.0; // meters,
+const double SAFE_DISTANCE = 90.0; // meters,
 // large enough to conisder to be safe to drive at top speed
 
 const double LANE_CHANGE_INERTIA_C = 1000.0;
