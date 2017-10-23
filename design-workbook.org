@@ -374,7 +374,6 @@ path_plan code is the top most level program for path planning.
 
 #+NAME:path_plan
 #+BEGIN_SRC C++ :noweb tangle :tangle
-  <<debug:my_car_states>>
   // Assemble information to call trajectory_f:
   my_car.id = -1; // hopefully impossible id of the other cars
   my_car.x  = car_x;
@@ -395,6 +394,7 @@ path_plan code is the top most level program for path planning.
   my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
   my_car.remaining_path_end_d = remaining_path_end_d;
 
+  <<debug:my_car_states>>
   TRAJECTORY remaining_trajectory;
   <<debug:remaining_trajectory>>
   for (auto x:remaining_path_x) {
@@ -422,18 +422,19 @@ path_plan code is the top most level program for path planning.
 
 #+NAME:debug:my_car_states
 #+BEGIN_SRC C++ :noweb tangle :tangle :exports none :main no
-ios::fmtflags old_settings = cout.flags();
-cout.precision(5);
+  ios::fmtflags old_settings = cout.flags();
+  cout.precision(5);
 
-cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
+  cout << "car_s|d|v: " << setw(7) << car_s << "|" << setw(7) << car_d
+  << "|"<< setw(5) << my_car.v << "; ";
 
-// << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-// << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-// << endl;
+  // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+  // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+  // << endl;
 
-// cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-//      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-//      << endl;
+  // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+  //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+  //      << endl;
 #+END_SRC
 
 #+NAME:debug:remaining_trajectory
@@ -655,7 +656,7 @@ Finally, we join the adopted portion of the remaining trajectory and the newly g
       {
         // cout << "case : " << smallest_start_index << "; ";
 
-        cout << "re-arranged: ";
+        // cout << "re-arranged: ";
         switch (smallest_start_index)
           {
           case 0:
@@ -687,7 +688,7 @@ Finally, we join the adopted portion of the remaining trajectory and the newly g
             cout << "Illegal index of the smallest s value. ";
           }
       }
-    cout << " coarse_s_traj.size(): " << coarse_s_traj.size() << "; " << endl;
+    // cout << " coarse_s_traj.size(): " << coarse_s_traj.size() << "; " << endl;
 
     // next s values
     vector<double> interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
@@ -716,12 +717,12 @@ Finally, we join the adopted portion of the remaining trajectory and the newly g
       }
       next_v += v_incr;
     }
-    cout << " coarse_s_traj: ";
-    for (auto s: coarse_s_traj)
-      {
-        cout << s << ", ";
-      }
-    cout << endl;
+    // cout << " coarse_s_traj: ";
+    // for (auto s: coarse_s_traj)
+    //   {
+    //     cout << s << ", ";
+    //   }
+    // cout << endl;
 
     interpolated_x_traj =
       interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);

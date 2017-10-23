@@ -107,18 +107,6 @@ int main() {
             // Sensor Fusion Data, a list of all other cars on the same side of the road.
             auto sensor_fusion = j[1]["sensor_fusion"];
         
-            ios::fmtflags old_settings = cout.flags();
-            cout.precision(5);
-            
-            cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
-            
-            // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-            // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-            // << endl;
-            
-            // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-            //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-            //      << endl;
             // Assemble information to call trajectory_f:
             my_car.id = -1; // hopefully impossible id of the other cars
             my_car.x  = car_x;
@@ -139,6 +127,19 @@ int main() {
             my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
             my_car.remaining_path_end_d = remaining_path_end_d;
             
+            ios::fmtflags old_settings = cout.flags();
+            cout.precision(5);
+            
+            cout << "car_s|d|v: " << setw(7) << car_s << "|" << setw(7) << car_d
+            << "|"<< setw(5) << my_car.v << "; ";
+            
+            // << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+            // << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            // << endl;
+            
+            // cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+            //      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+            //      << endl;
             TRAJECTORY remaining_trajectory;
             // cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
             // transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
