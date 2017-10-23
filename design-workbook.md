@@ -18,6 +18,15 @@ The full source code can be generated from this literate programming document: .
 In this design document, "my\_car" refers to the car being controlled by the path planner.
 
 
+# Performance
+
+  The path planner can drive the car to run multiple full lapses of the track. Most of the time the car runs steady.
+But sometimes, it has problem of exceeding the speed limits, and may exceed the jerk limit sometimes.
+Occasionally, it might even have collision.
+
+Here is a link on Youtube for a capture of a running session: <https://youtu.be/VNHvzWy84GE>
+
+
 # The definition of data
 
 The following is the definition of the input and output data. They serves as the assumption of the
@@ -751,6 +760,13 @@ the distance becomes not acceptable.
       return c;
     }
     
+    double punished_start_distance_congestion(double dist_start)
+    {
+      double punish_weight = 1.01; // punish further this case
+      double c = punish_weight * start_distance_congestion(dist_start);
+      return c;
+    }
+    
     double congestion_f(Car front, Car behind, double start_time, double end_time)
     { // returns the congestion coefficient between the two cars.
       // To simplify, assume they have zero acceleration
@@ -766,9 +782,7 @@ the distance becomes not acceptable.
         { // behind.v > front.v
           if (dist_start <= SAFE_DISTANCE)
             {
-              double punish_weight = 1.01; // punish further this case
-    
-              c = punish_weight * start_distance_congestion(dist_start);
+              c = punished_start_distance_congestion(dist_start);
               cout <<  " start_time: " << setw(5) << start_time
                    << ", front slower and start with less safe distance, dist_start: "
                    << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
@@ -906,6 +920,9 @@ All the expected kinematic data of interests are stored in the structure KINEMAT
 The target velocity will be computed. It's needed as the target speed to adjust my\_car's speed in the new trajectory
 generation in `trajectory_f`, when my\_car change lane.
 
+Experiment to make the allowed speed to have tighter condition: only when the car in front is slower,
+and close enough to adopt it's speed.
+
 It's not reasonable to expect the car to accelerate/deacceleration within one update interval. This might be the root cause of
 the car jerks too often. It's reasonable to assume that a car would be able to adjust the speed in a few seconds.
 I'd experiment with 5 seconds. I call this the planning horizon. I should use consistently wherever applicable.
@@ -922,17 +939,10 @@ This is an experimental design. I have not found better approximation yet given 
       KINEMATIC_DATA kinematic;
       kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
       kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
-      double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
-      // assuming an average speed, an approximation in order to estimate my_car_s position
-      // at the end of the horizon
-      double projected_front_car_s
-        = data_lanes.lanes[lane_changed_to].nearest_front.s
-        + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
-      double gap_front = projected_front_car_s - projected_my_car_s;
-      if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
-      //if (0.3 < data_lanes.lanes[lane_changed_to].congestion_front)
+      double critical_congestion = punished_start_distance_congestion(SAFE_DISTANCE);
+      if (critical_congestion < data_lanes.lanes[lane_changed_to].congestion_front)
         {
-          kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
+          kinematic.v = min(SPEED_LIMIT, data_lanes.lanes[lane_changed_to].nearest_front.v);
         }
       kinematic.a = (kinematic.v - my_car.v)/kinematic.horizon;
       return kinematic;
@@ -1194,19 +1204,12 @@ Here are the parameters for the path planner.
     // const double DESIRED_TIME_BUFFER = 10; // seconds,
     // according to http://copradar.com/redlight/factors/ ;
     // change from 30 to 10 for better differentiation
-    const double SAFE_DISTANCE = 120.0; // meters,
+    const double SAFE_DISTANCE = 90.0; // meters,
     // large enough to conisder to be safe to drive at top speed
     
     const double LANE_CHANGE_INERTIA_C = 1000.0;
     
     #endif
-
-
-# Performance
-
-  The path planner can drive the car to run multiple full lapses of the track. Most of the time the car runs steady.
-But sometimes, it has problem of exceeding the speed limits, and may have some exceeding the jerk limit.
-Occasionally, it might even have collision.
 
 
 # Further investigation

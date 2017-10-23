@@ -35,7 +35,7 @@ In this design document, "my_car" refers to the car being controlled by the path
 But sometimes, it has problem of exceeding the speed limits, and may exceed the jerk limit sometimes.
 Occasionally, it might even have collision.
 
-Here is a link on Youtube for a capture of a running session: [[yt:VNHvzWy84GE]]
+Here is a link on Youtube for a capture of a running session: [[https://youtu.be/VNHvzWy84GE]]
 
 * The definition of data
 
@@ -965,14 +965,6 @@ Compute the decision should the maneuver is performed.
     KINEMATIC_DATA kinematic;
     kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
     kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
-    // double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
-    // // assuming an average speed, an approximation in order to estimate my_car_s position
-    // // at the end of the horizon
-    // double projected_front_car_s
-    //   = data_lanes.lanes[lane_changed_to].nearest_front.s
-    //   + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
-    // double gap_front = projected_front_car_s - projected_my_car_s;
-    //if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
     double critical_congestion = punished_start_distance_congestion(SAFE_DISTANCE);
     if (critical_congestion < data_lanes.lanes[lane_changed_to].congestion_front)
       {
