@@ -225,18 +225,18 @@ KINEMATIC_DATA kinematic_required_in_front
   KINEMATIC_DATA kinematic;
   kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
   kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
-  double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
-  // assuming an average speed, an approximation in order to estimate my_car_s position
-  // at the end of the horizon
-  double projected_front_car_s
-    = data_lanes.lanes[lane_changed_to].nearest_front.s
-    + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
-  double gap_front = projected_front_car_s - projected_my_car_s;
+  // double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
+  // // assuming an average speed, an approximation in order to estimate my_car_s position
+  // // at the end of the horizon
+  // double projected_front_car_s
+  //   = data_lanes.lanes[lane_changed_to].nearest_front.s
+  //   + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
+  // double gap_front = projected_front_car_s - projected_my_car_s;
   //if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
   double critical_congestion = punished_start_distance_congestion(SAFE_DISTANCE);
   if (critical_congestion < data_lanes.lanes[lane_changed_to].congestion_front)
     {
-      kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
+      kinematic.v = min(SPEED_LIMIT, data_lanes.lanes[lane_changed_to].nearest_front.v);
     }
   kinematic.a = (kinematic.v - my_car.v)/kinematic.horizon;
   return kinematic;
