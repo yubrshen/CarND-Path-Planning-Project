@@ -130,20 +130,6 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
   return closestWaypoint;
 }
 
-  // int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
-  // {
-  //   int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-  //   double map_x = maps_x[closestWaypoint];
-  //   double map_y = maps_y[closestWaypoint];
-  //   double heading = atan2( (map_y-y),(map_x-x) );
-  //   double angle = abs(theta-heading);
-  //   if(angle > pi()/4)
-  //   {
-  //     closestWaypoint++;
-  //   }
-  //   return closestWaypoint;
-  // }
-
   // Transform from Cartesian x,y coordinates to Frenet s,d coordinates
   vector<double> getFrenet(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y, vector<double> maps_s)
   {
@@ -201,5 +187,60 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
     double y = seg_y + d*sin(perp_heading);
     return {x,y};
   }
+
+vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
+                                  vector<double> eval_at_x) {
+  // uses the spline library to interpolate points connecting a series of x and y values
+  // output is spline evaluated at each eval_at_x point
+
+  if (pts_x.size() != pts_y.size()) {
+    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
+    return { 0 };
+  }
+
+  tk::spline s;
+  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
+  vector<double> output;
+  for (double x: eval_at_x) {
+    output.push_back(s(x));
+  }
+  return output;
+}
+
+vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
+                                  double interval, int output_size) {
+  // uses the spline library to interpolate points connecting a series of x and y values
+  // output is output_size number of y values beginning at y[0] with specified fixed interval
+
+  if (pts_x.size() != pts_y.size()) {
+    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
+    return { 0 };
+  }
+
+  tk::spline s;
+  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
+  vector<double> output;
+  for (int i = 0; i < output_size; i++) {
+    output.push_back(s(pts_x[0] + i * interval));
+  }
+  return output;
+}
+
+template <typename T>
+void vector_remove(vector<T> & a_vector, T value) {
+  a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
+}
+
+template <typename T>
+typename T::iterator min_map_element(T& m) {
+  return min_element(m.begin(), m.end(),
+                     [](typename T::value_type& l,
+                        typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
+}
+
+constexpr unsigned int str2int(const char* str, int h = 0)
+{
+  return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
+}
 
   #endif

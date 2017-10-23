@@ -102,8 +102,10 @@ plus its (transformed) total velocity (m/s) multiplied by the time elapsed into 
         auto remaining_path_x = j[1]["previous_path_x"];
         auto remaining_path_y = j[1]["previous_path_y"];
         // Previous path's end s and d values
-        double remaining_path_end_s = j[1]["end_path_s"]; // not yet used, keep for documentation purpose
-        double remaining_path_end_d = j[1]["end_path_d"]; // not yet used, keep might be needed
+        double remaining_path_end_s = j[1]["end_path_s"];
+        // not yet used, keep for documentation purpose
+        double remaining_path_end_d = j[1]["end_path_d"];
+        // not yet used, keep might be needed
 
         // Sensor Fusion Data, a list of all other cars on the same side of the road.
         auto sensor_fusion = j[1]["sensor_fusion"];
@@ -128,372 +130,23 @@ plus its (transformed) total velocity (m/s) multiplied by the time elapsed into 
 
 
 * Top level design
+** Majors Modules
+
+  The path planner are consists of the following modules:
+
+- Kinematics: collect and analysis of my_car's kinematics information required for maneuver decision in relationship to the other cares
+- Maneuvers: determines the appropriate maneuver
+- Trajectory: create the smooth trajectory
+- Data-model: the common data structures to support the other modules
+
 
   I presents the design from top to bottom for ease of review.
 
-** path_plan
-path_plan code is the top most level program for path planning.
-   It ingests update of my_car's status while performing necessary transformation.
-   Especially, it bases on the current location of my_car, improves the accuracy of the waypoint maps in order to achieve higher accuracy in
-   estimation of locations.
+** Path Planner Data Model
 
-   Then it calls =trajectory_f= to generate the new trajectory in trajectory data structure, which will be fed to the simulator for subsequent
-   control.
+Here are the main data structures for the construction of the path planner. It's the main body of concepts and vocabulary of the degsin.
 
-#+NAME:path_plan
-#+BEGIN_SRC C++ :noweb tangle :tangle
-  <<debug:my_car_states>>
-  // Assemble information to call trajectory_f:
-  my_car.id = -1; // hopefully impossible id of the other cars
-  my_car.x  = car_x;
-  my_car.y  = car_y;
-  my_car.yaw = deg2rad(car_yaw);
-
-  double old_v = my_car.v;
-  my_car.v  = mph_2_meterps(car_speed);
-  my_car.s  = wrap_around(car_s);
-  my_car.d  = car_d;
-  my_car.lane_index = d_to_lane_index(car_d);
-
-  double old_a = my_car.a;
-  my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
-
-  my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
-
-  my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
-  my_car.remaining_path_end_d = remaining_path_end_d;
-
-  TRAJECTORY remaining_trajectory;
-  <<debug:remaining_trajectory>>
-  for (auto x:remaining_path_x) {
-    remaining_trajectory.x_vals.push_back(x);
-    // cout << setw(6) << x << ", ";
-   }
-
-  //cout << endl;
-  //cout << "remaining y: ";
-  for (auto y:remaining_path_y) {
-    remaining_trajectory.y_vals.push_back(y);
-    // cout << setw(6) << y << ", ";
-   }
-
-  // cout << endl;
-
-  // Fix and refine the waypoint maps to improve the resolution of computing
-
-  WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
-                                             map_waypoints_x, map_waypoints_y, map_waypoints_s,
-                                             map_waypoints_dx, map_waypoints_dy);
-  TRAJECTORY trajectory
-  = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
-#+END_SRC
-
-#+NAME:debug:my_car_states
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-ios::fmtflags old_settings = cout.flags();
-cout.precision(5);
-
-cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
-
-// << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
-// << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-// << endl;
-
-// cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
-//      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
-//      << endl;
-#+END_SRC
-
-#+NAME:debug:remaining_trajectory
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-// cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
-// transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
-// the vector assginment.
-// cout << endl;
-// cout << "remaining x: ";
-#+END_SRC
-
-** trajactory
-
-   Produces the next trajectory to control the car based on my_car's sates, sensor fusion data of the other cars in the roads.
-
-   For trajectory generations,
-- it first parses the sensor data producing the lane congestion status in relationship to the position
-and current speed of =my_car=. This is implemented by =parse_sensor_data=. The congestion information is returned in =data_lanes=
-
-- based on the congestion information, it considers maneuver options including keep the current lane, or change to adjacent lanes. It selects the
-  option with the least cost. This is implemented by =maneuver=. The decision is returned in =decision=.
-
-- the rest of the code, generate the trajectory for the selected decision.
-
-The decision is defined in terms of the lane to change to, the speed to use, etc.
-
-The new trajectory is formed by combing the first portion of the remaining trajectory that had been fed to the simulator, and additional trajectory
-points. Special caution is made to make smooth transition from the previously planned trajectory and the additional points.
-
-The smoothness is realized using spline routine with two points from the end of adopted previous trajectory
-and two points dictated by the maneuver decision.
-
-With the 4 seeding points, two spline lines are generated
-in terms of functions from frenet s coordinate value to the corresponding x, and y coordinate values respectively.
-
-The purpose of the above scheme is to generate speed control spaced trajectory points. Another series of s coordinate values corresponding to the number
-of additional trajectory points is generated such that the length between consecutive s $\delta s$ value would satisfy with the following:
-
-
-\begin{eqnarray}
-\label{eq:1}
-\delta s & = & v \cdot \delta t
-\end{eqnarray}
-
-where $v$ is the expected velocity for my_car for the segment on frenet coordinate, and $\delta t$ is the time interval which simulator updates the car's
-position.
-
-The expected velocity for segment is calculated based the starting velocity from at the start of the adopted remaining trajectory,
-in the series of segment, each segment would increment a delta. The value of the delta is empirically determined to avoid increasing too abruptly, not as to generate the feeling of jerk to the
-passengers in the car. The increment would become zero when the speed reaches the target speed. The target speed is the speed at the end of the new trajectory.
-
-This algorithm may not be accurate. Sometimes, it may still lead to jerk, and often it may be drive the car too slow.
-
-The following approximation might work better:
-
-\begin{eqnarray}
-\label{eq:2}
-\delta v & = & \frac{(v_{end} -v_{start}} {n}
-\end{eqnarray}
-
-where $\delat v$ is the increment in velocity, $v_{start}$ the starting speed of my_car at the start of the adopted remaining trajectory.
-$v_{end}$ the expected speed of my_car at the end of the new trajectory.
-
-$v_{start}$ value can be rather reliably estimated based on
-the remaining trajectory data with waypoints.
-
-It's $v_{end}$ that I may not have confidence. The current approximation may be too large often. I may revisit the related kinematics modeling.
-
-We use the generated s sequence access the two spline functions to get the corresponding x, and y values respectively,
-then the x, y value pair would be the expected additional trajectory.
-
-Finally, we join the adopted portion of the remaining trajectory and the newly generated trajectory.
-
-#+NAME:trajectory
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY remaining_trajectory,
-                          WAYPOINTS_MAP waypoints_maps)
-  {
-    TRAJECTORY trajectory; // the return value
-
-    int remaining_path_adopted_size =
-      min((int)remaining_trajectory.x_vals.size(), NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
-
-    int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
-    // cout << " new_traj_size: " << new_traj_size << "; ";
-
-    double start_time = remaining_path_adopted_size * UPDATE_INTERVAL;
-    double end_time   = start_time + new_traj_size  * UPDATE_INTERVAL;
-
-    DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, start_time, end_time);
-
-    Decision decision = maneuver_f(my_car, data_lanes);
-
-    // default values for the start of the new trajectory, applicable when there is not enough remaining_trajectory
-    double start_s   = my_car.s;
-    double start_x   = my_car.x;
-    double start_y   = my_car.y;
-    double start_yaw = my_car.yaw;
-    double start_v   = my_car.v;
-    double start_d   = my_car.d;
-
-    // modulate the start values of trajectory by the remaining trajectory:
-    if (2 <= remaining_path_adopted_size) {
-      // consider current position to be last point of previous path to be kept
-      start_x          = remaining_trajectory.x_vals[remaining_path_adopted_size-1];
-      start_y          = remaining_trajectory.y_vals[remaining_path_adopted_size-1];
-      double start_x2  = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
-      double start_y2  = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
-      double start_yaw = atan2(start_y-start_y2,
-                               start_x-start_x2);
-      vector<double> frenet = getFrenet(start_x, start_y, start_yaw, waypoints_maps._x, waypoints_maps._y, waypoints_maps._s);
-      start_s = frenet[0];
-      start_s = wrap_around(start_s); // maybe needed
-      start_d = frenet[1];
-
-      // determine dx, dy vector from set of interpoated waypoints, with start_x, start_y as reference point;
-      // since interpolated waypoints are ~1m apart and path points tend to be <0.5m apart, these
-      // values can be reused for previous two points (and using the previous waypoint data may be
-      // more accurate) to calculate vel_s (start_v), vel_d (start_d_dot), acc_s (s_ddot), and acc_d (d_ddot)
-      int next_interp_waypoint_index = NextWaypoint(start_x, start_y, start_yaw,
-                                                    waypoints_maps._x, waypoints_maps._y);
-      double dx = waypoints_maps._dx[next_interp_waypoint_index - 1];
-      double dy = waypoints_maps._dy[next_interp_waypoint_index - 1];
-      // sx,sy vector is perpendicular to dx,dy
-      double sx = -dy;
-      double sy = dx;
-
-      // calculate start_v & start_d_dot
-      double vel_x1 = (start_x - start_x2) / UPDATE_INTERVAL;
-      double vel_y1 = (start_y - start_y2) / UPDATE_INTERVAL;
-      // want projection of xy velocity vector (V) onto S (sx,sy) and D (dx,dy) vectors, and since S
-      // and D are unit vectors this is simply the dot products of V with S and V with D
-      start_v = vel_x1 * sx + vel_y1 * sy;
-    }
-
-    // ********************* PRODUCE NEW PATH ***********************
-    // begin by pushing the last and next-to-last point from the previous path for setting the
-    // spline the last point should be the first point in the returned trajectory, but because of
-    // imprecision, also add that point manually
-
-    double prev_s = wrap_around(start_s - start_v * UPDATE_INTERVAL);
-    int smallest_start_index = 0; // default 0
-    if (start_s < prev_s)
-      {
-        smallest_start_index = 1;
-        cout << "start_s <= prev_s start_s | prev_s: " << start_s << "|" << prev_s << "; ";
-      }
-    double prev_x, prev_y;
-
-    // first two points of coarse trajectory, to ensure spline begins smoothly
-    if (2 <= remaining_path_adopted_size) {
-      prev_x = (remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
-      prev_y = (remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
-    } else {
-      prev_s = wrap_around(start_s - 1);
-      prev_x = start_x - cos(start_yaw);
-      prev_y = start_y - sin(start_yaw);
-    }
-
-    // last two points of coarse trajectory, use target_d and current s + 30,60
-    double target_1_s = (start_s + 30);
-    if (MAX_S <= target_1_s)
-      {
-        smallest_start_index = 2;
-        target_1_s -= MAX_S;
-      }
-    double target_d1 = lane_center_d(decision.lane_index_changed_to);
-    vector<double> target_xy1 = getXY(target_1_s, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-    double target_1_x = target_xy1[0];
-    double target_1_y = target_xy1[1];
-    double target_2_s = (target_1_s + 30);
-    if (MAX_S <= target_2_s)
-      {
-        smallest_start_index = 3;
-        target_2_s -= MAX_S;
-      }
-    double target_d2 = target_d1;
-    vector<double> target_xy2 = getXY(target_2_s, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
-    double target_2_x = target_xy2[0];
-    double target_2_y = target_xy2[1];
-    vector<double> coarse_s_traj, coarse_x_traj, coarse_y_traj;
-
-    // arrange the seeding trajectory points to ensure coarse_s_traj has increasing order
-    map<string, map<string, double> > seeds =
-      {
-        {"prev",     {{"s", prev_s},     {"x", prev_x},     {"y", prev_y}}},
-        {"start",    {{"s", start_s},    {"x", start_x},    {"y", start_y}}},
-        {"target_1", {{"s", target_1_s}, {"x", target_1_x}, {"y", target_1_y}}},
-        {"target_2", {{"s", target_2_s}, {"x", target_2_x}, {"y", target_2_y}}}
-      };
-    map<string, vector<double>* > trajs =
-      {
-        {"s", &coarse_s_traj},
-        {"x", &coarse_x_traj},
-        {"y", &coarse_y_traj}
-      };
-
-    for (string sxy: {"s", "x", "y"})
-      {
-        // cout << "case : " << smallest_start_index << "; ";
-
-        cout << "re-arranged: ";
-        switch (smallest_start_index)
-          {
-          case 0:
-            for (string p: {"prev", "start", "target_1", "target_2"})
-              {
-                trajs[sxy]->push_back(seeds[p][sxy]);
-              }
-            break;
-          case 1:
-            for (string p: {"start", "target_1", "target_2", "prev"})
-              {
-                // cout << seeds[p][sxy] << ", ";
-                trajs[sxy]->push_back(seeds[p][sxy]);
-              }
-            break;
-          case 2:
-            for (string p: {"target_1", "target_2", "prev", "start"})
-              {
-                trajs[sxy]->push_back(seeds[p][sxy]);
-              }
-            break;
-          case 3:
-            for (string p: {"target_2", "prev", "start", "target_1"})
-              {
-                trajs[sxy]->push_back(seeds[p][sxy]);
-              }
-            break;
-          default:
-            cout << "Illegal index of the smallest s value. ";
-          }
-      }
-    cout << " coarse_s_traj.size(): " << coarse_s_traj.size() << "; " << endl;
-
-    // next s values
-    vector<double> interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
-    double target_v = decision.projected_kinematics.v; // best_target[0][1];
-    double next_s = start_s;
-    // double prev_updated_s = -MAX_S; // impossibly small
-
-    double next_v = start_v;
-    // const double VELOCITY_INCREMENT_LIMIT = 0.125;
-    // cout << " next_v: ";
-    for (int i = 0; i < new_traj_size; i++) {
-      double v_incr = 0;
-      next_s += next_v * UPDATE_INTERVAL;
-      // prevent non-increasing s values:
-      next_s = wrap_around(next_s);
-      // if (next_s <= prev_updated_s)
-      //   break;
-      // prev_updated_s = next_s;
-      // cout << setw(5) << next_v << ", ";
-      interpolated_s_traj.push_back(next_s);
-      if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
-        v_incr = 0;
-      } else {
-        // arrived at VELOCITY_INCREMENT_LIMIT value empirically
-        v_incr = (target_v - next_v)/(fabs(target_v - next_v)) * VELOCITY_INCREMENT_LIMIT;
-      }
-      next_v += v_incr;
-    }
-    cout << " coarse_s_traj: ";
-    for (auto s: coarse_s_traj)
-      {
-        cout << s << ", ";
-      }
-    cout << endl;
-
-    interpolated_x_traj = interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);
-    interpolated_y_traj = interpolate_points(coarse_s_traj, coarse_y_traj, interpolated_s_traj);
-
-    // add previous path, if any, to next path
-    // Start with the adopted portion of the previous path points from last time
-    for (int i = 0; i < remaining_path_adopted_size; i++) {
-      trajectory.x_vals.push_back(remaining_trajectory.x_vals[i]);
-      trajectory.y_vals.push_back(remaining_trajectory.y_vals[i]);
-    }
-
-    // add xy points from newly generated path
-    // Fill up the rest of the points for the planner
-    for (int i = 0; i < interpolated_s_traj.size(); i++) {
-      trajectory.x_vals.push_back(interpolated_x_traj[i]);
-      trajectory.y_vals.push_back(interpolated_y_traj[i]);
-    }
-    return trajectory;
-  }
-#+END_SRC
-
-** parse-fusion-data
-
-From the sensor fusion data, we Need to find the nearest vehicles in each lane in front of my_car and behind,
+From the sensor fusion data, we need to find the nearest vehicles in each lane in front of my_car and behind,
 and also the projected nearest distance to the nearest vehicle. The nearest distance is further processed into congestion characterization.
 
 The congestion with the nearest vehicle would be used to compute the cost of collision and buffer.
@@ -501,10 +154,9 @@ The congestion with the nearest vehicle would be used to compute the cost of col
 The distance would be calculated based on the time horizon when the new trajectory would start to be used, till the end of the new
 trajectory.
 
-The need for refined resolution of the distance and the time reaching the threshold.
 
-#+NAME:parse-fusion-data-declaration
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+NAME:path-planner-data-model-declaration
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/data_model.h :main no
   enum DIRECTION {LEFT = 1, RIGHT = 2};
 
   enum MANEUVER {KL=1, LCL=2, LCR=3, PLCL=4, PLCR=5};
@@ -586,11 +238,15 @@ The need for refined resolution of the distance and the time reaching the thresh
 #+END_SRC
 
 #+NAME:parse-fusion-data
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  void update_surronding(Car my_car, double congestion, int lane, DATA_LANES *data_lanes) {
+#+BEGIN_SRC C++ :noweb tangle :tangle
+  void update_surronding(Car my_car, double congestion, int lane,
+                         DATA_LANES *data_lanes)
+  {
     /*
-      Based on the distance between the car in front, and that behind, congestion to determine the car's
-      status, represented in the fields of DATA_LANES: car_crashing_front_or_behind, car_to_left, car_to_right.
+      Based on the distance between the car in front, and that behind,
+      congestion to determine the car's status,
+      represented in the fields of DATA_LANES:
+      car_crashing_front_or_behind, car_to_left, car_to_right.
      ,*/
     data_lanes-> car_crashing_front_or_behind = false;
     data_lanes-> car_to_left                  = false;
@@ -610,12 +266,16 @@ The need for refined resolution of the distance and the time reaching the thresh
         break;
       }} else
       {
-      // cout <<"car_{right, left, ahead}: " << data_lanes->car_to_right << ", " << data_lanes->car_to_left << ", " << data_lanes->car_crashing_front_or_behind;
+        // cout <<"car_{right, left, ahead}: " << data_lanes->car_to_right << ", "
+        // << data_lanes->car_to_left << ", "
+        // << data_lanes->car_crashing_front_or_behind;
       }
   }
 
-  DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double start_time, double end_time)
-  { /* find the nearest car in front, and behind, and find the congestion conditions in front of my_car, and behind
+  DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion,
+                               double start_time, double end_time)
+  { /* find the nearest car in front, and behind, and
+       find the congestion conditions in front of my_car, and behind
        for the time period of start_time and end_time.
     ,*/
 
@@ -676,7 +336,8 @@ The need for refined resolution of the distance and the time reaching the thresh
     // For only the legal lanes adjacent to my_car.lane_index,
     int left_lane  = my_car.lane_index -1;
     int right_lane = my_car.lane_index +1;
-    // cout << "candidates_{left | right}_lane: " << left_lane << " | " << right_lane << "; ";
+    // cout << "candidates_{left | right}_lane: " << left_lane << " | "
+    // << right_lane << "; ";
     vector<int> lanes_interested = {my_car.lane_index};
     if (0 <= left_lane)         lanes_interested.push_back(left_lane);
     if (right_lane < NUM_LANES) lanes_interested.push_back(right_lane);
@@ -685,14 +346,16 @@ The need for refined resolution of the distance and the time reaching the thresh
       if (!data_lanes.lanes[lane].nearest_back.empty)
         {
           cout << " back congestion: ";
-          double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back, start_time, end_time);
+          double congestion = congestion_f(my_car, data_lanes.lanes[lane].nearest_back,
+                                           start_time, end_time);
           data_lanes.lanes[lane].congestion_behind = congestion;
           update_surronding(my_car, congestion, lane, &data_lanes);
         }
       if (!data_lanes.lanes[lane].nearest_front.empty)
         {
           cout << " front congestion: ";
-          double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car, start_time, end_time);
+          double congestion = congestion_f(data_lanes.lanes[lane].nearest_front, my_car,
+                                           start_time, end_time);
           data_lanes.lanes[lane].congestion_front = congestion;
           update_surronding(my_car, congestion, lane, &data_lanes);
         }
@@ -700,6 +363,388 @@ The need for refined resolution of the distance and the time reaching the thresh
     return data_lanes;
   }
 #+END_SRC
+** path_plan
+path_plan code is the top most level program for path planning.
+   It ingests update of my_car's status while performing necessary transformation.
+   Especially, it bases on the current location of my_car, improves the accuracy of the waypoint maps in order to achieve higher accuracy in
+   estimation of locations.
+
+   Then it calls =trajectory_f= to generate the new trajectory in trajectory data structure, which will be fed to the simulator for subsequent
+   control.
+
+#+NAME:path_plan
+#+BEGIN_SRC C++ :noweb tangle :tangle
+  <<debug:my_car_states>>
+  // Assemble information to call trajectory_f:
+  my_car.id = -1; // hopefully impossible id of the other cars
+  my_car.x  = car_x;
+  my_car.y  = car_y;
+  my_car.yaw = deg2rad(car_yaw);
+
+  double old_v = my_car.v;
+  my_car.v  = mph_2_meterps(car_speed);
+  my_car.s  = wrap_around(car_s);
+  my_car.d  = car_d;
+  my_car.lane_index = d_to_lane_index(car_d);
+
+  double old_a = my_car.a;
+  my_car.a = (my_car.v - old_v)/UPDATE_INTERVAL;
+
+  my_car.jerk = (my_car.a - old_a)/UPDATE_INTERVAL;
+
+  my_car.remaining_path_end_s = wrap_around(remaining_path_end_s);
+  my_car.remaining_path_end_d = remaining_path_end_d;
+
+  TRAJECTORY remaining_trajectory;
+  <<debug:remaining_trajectory>>
+  for (auto x:remaining_path_x) {
+    remaining_trajectory.x_vals.push_back(x);
+    // cout << setw(6) << x << ", ";
+   }
+
+  //cout << endl;
+  //cout << "remaining y: ";
+  for (auto y:remaining_path_y) {
+    remaining_trajectory.y_vals.push_back(y);
+    // cout << setw(6) << y << ", ";
+   }
+
+  // cout << endl;
+
+  // Fix and refine the waypoint maps to improve the resolution of computing
+
+  WAYPOINTS_MAP refined_maps = refine_maps_f(my_car,
+                                             map_waypoints_x, map_waypoints_y, map_waypoints_s,
+                                             map_waypoints_dx, map_waypoints_dy);
+  TRAJECTORY trajectory
+  = trajectory_f(my_car, sensor_fusion, remaining_trajectory, refined_maps);
+#+END_SRC
+
+#+NAME:debug:my_car_states
+#+BEGIN_SRC C++ :noweb tangle :tangle :exports none :main no
+ios::fmtflags old_settings = cout.flags();
+cout.precision(5);
+
+cout << "car_s|d: " << setw(7) << car_s << " | " << setw(7) << car_d << "; ";
+
+// << " car_x|y: " << setw(7)<< car_x << " | " << setw(7)<< car_y << " remaining_path_end_s|d: "<< setw(7)
+// << remaining_path_end_s << " | " << setw(7)<< remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+// << endl;
+
+// cout << "car_s: " << car_s << ", car_{x, y}: " << car_x << ", " << car_y << " remaining_path_end_{s, d}: "
+//      << remaining_path_end_s << ", " << remaining_path_end_d << " car_speed (meters/s) " << mph_2_meterps(car_speed)
+//      << endl;
+#+END_SRC
+
+#+NAME:debug:remaining_trajectory
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
+// cout << "rem. p_{x, y}_len: " << remaining_path_x.size() << ", " << remaining_path_y.size() << ", ";
+// transfer to the remaining trajectory from auto type to pair of double<vector>, otherwise, the compiler reject
+// the vector assginment.
+// cout << endl;
+// cout << "remaining x: ";
+#+END_SRC
+
+** trajactory
+
+   Produces the next trajectory to control the car based on my_car's sates, sensor fusion data of the other cars in the roads.
+
+   For trajectory generations,
+- it first parses the sensor data producing the lane congestion status in relationship to the position
+and current speed of =my_car=. This is implemented by =parse_sensor_data=. The congestion information is returned in =data_lanes=
+
+- based on the congestion information, it considers maneuver options including keep the current lane, or change to adjacent lanes. It selects the
+  option with the least cost. This is implemented by =maneuver=. The decision is returned in =decision=.
+
+- the rest of the code, generate the trajectory for the selected decision.
+
+The decision is defined in terms of the lane to change to, the speed to use, etc.
+
+The new trajectory is formed by combing the first portion of the remaining trajectory that had been fed to the simulator, and additional trajectory
+points. Special caution is made to make smooth transition from the previously planned trajectory and the additional points.
+
+The smoothness is realized using spline routine with two points from the end of adopted previous trajectory
+and two points dictated by the maneuver decision.
+
+With the 4 seeding points, two spline lines are generated
+in terms of functions from frenet s coordinate value to the corresponding x, and y coordinate values respectively.
+
+The purpose of the above scheme is to generate speed control spaced trajectory points. Another series of s coordinate values corresponding to the number
+of additional trajectory points is generated such that the length between consecutive s $\delta s$ value would satisfy with the following:
+
+
+\begin{eqnarray}
+\label{eq:1}
+\delta s & = & v \cdot \delta t
+\end{eqnarray}
+
+where $v$ is the expected velocity for my_car for the segment on frenet coordinate, and $\delta t$ is the time interval which simulator updates the car's
+position.
+
+The expected velocity for segment is calculated based the starting velocity from at the start of the adopted remaining trajectory,
+in the series of segment, each segment would increment a delta. The value of the delta is empirically determined to avoid increasing too abruptly, not as to generate the feeling of jerk to the
+passengers in the car. The increment would become zero when the speed reaches the target speed. The target speed is the speed at the end of the new trajectory.
+
+This algorithm may not be accurate. Sometimes, it may still lead to jerk, and often it may be drive the car too slow.
+
+The following approximation might work better:
+
+\begin{eqnarray}
+\label{eq:2}
+\delta v & = & \frac{(v_{end} -v_{start})}{n}
+\end{eqnarray}
+
+where $\delta v$ is the increment in velocity,
+$v_{start}$ the starting speed of my_car at the start of the adopted remaining trajectory.
+$v_{end}$ the expected speed of my_car at the end of the new trajectory.
+
+$v_{start}$ value can be rather reliably estimated based on
+the remaining trajectory data with waypoints.
+
+It's $v_{end}$ that I may not have confidence. The current approximation may be too large often. I may revisit the related kinematics modeling.
+
+We use the generated s sequence access the two spline functions to get the corresponding x, and y values respectively,
+then the x, y value pair would be the expected additional trajectory.
+
+Finally, we join the adopted portion of the remaining trajectory and the newly generated trajectory.
+
+#+NAME:trajectory
+#+BEGIN_SRC C++ :noweb tangle :tangle
+  TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion,
+                          TRAJECTORY remaining_trajectory,
+                          WAYPOINTS_MAP waypoints_maps)
+  {
+    TRAJECTORY trajectory; // the return value
+
+    int remaining_path_adopted_size = min((int)remaining_trajectory.x_vals.size(),
+                                          NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS);
+
+    int new_traj_size = PLANNED_TRAJECTORY_LENGTH - remaining_path_adopted_size;
+    // cout << " new_traj_size: " << new_traj_size << "; ";
+
+    double start_time = remaining_path_adopted_size * UPDATE_INTERVAL;
+    double end_time   = start_time + new_traj_size  * UPDATE_INTERVAL;
+
+    DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion,
+                                              start_time, end_time);
+
+    Decision decision = maneuver_f(my_car, data_lanes);
+
+    // default values for the start of the new trajectory,
+    // applicable when there is not enough remaining_trajectory
+    double start_s   = my_car.s;
+    double start_x   = my_car.x;
+    double start_y   = my_car.y;
+    double start_yaw = my_car.yaw;
+    double start_v   = my_car.v;
+    double start_d   = my_car.d;
+
+    // modulate the start values of trajectory by the remaining trajectory:
+    if (2 <= remaining_path_adopted_size) {
+      // consider current position to be last point of previous path to be kept
+      start_x          = remaining_trajectory.x_vals[remaining_path_adopted_size-1];
+      start_y          = remaining_trajectory.y_vals[remaining_path_adopted_size-1];
+      double start_x2  = remaining_trajectory.x_vals[remaining_path_adopted_size-2];
+      double start_y2  = remaining_trajectory.y_vals[remaining_path_adopted_size-2];
+      double start_yaw = atan2(start_y-start_y2,
+                               start_x-start_x2);
+      vector<double> frenet = getFrenet(start_x, start_y, start_yaw,
+                                        waypoints_maps._x, waypoints_maps._y,
+                                        waypoints_maps._s);
+      start_s = frenet[0];
+      start_s = wrap_around(start_s); // maybe needed
+      start_d = frenet[1];
+
+      // determine dx, dy vector from set of interpoated waypoints,
+      // with start_x, start_y as reference point;
+      // since interpolated waypoints are ~1m apart and
+      // path points tend to be <0.5m apart,
+      // these values can be reused for previous two points
+      // (and using the previous waypoint data may be more accurate)
+      // to calculate vel_s (start_v), vel_d (start_d_dot),
+      // acc_s (s_ddot), and acc_d (d_ddot)
+      int next_interp_waypoint_index = NextWaypoint(start_x, start_y, start_yaw,
+                                                    waypoints_maps._x, waypoints_maps._y);
+      double dx = waypoints_maps._dx[next_interp_waypoint_index - 1];
+      double dy = waypoints_maps._dy[next_interp_waypoint_index - 1];
+      // sx,sy vector is perpendicular to dx,dy
+      double sx = -dy;
+      double sy = dx;
+
+      // calculate start_v & start_d_dot
+      double vel_x1 = (start_x - start_x2) / UPDATE_INTERVAL;
+      double vel_y1 = (start_y - start_y2) / UPDATE_INTERVAL;
+      // want projection of xy velocity vector (V) onto S (sx,sy) and D (dx,dy) vectors,
+      // and since S and D are unit vectors this is simply the dot products
+      // of V with S and V with D
+      start_v = vel_x1 * sx + vel_y1 * sy;
+    }
+
+    // ********************* PRODUCE NEW PATH ***********************
+    // begin by pushing the last and next-to-last point
+    // from the previous path for setting the
+    // spline the last point should be the first point in the returned trajectory,
+    // but because of imprecision, also add that point manually
+
+    double prev_s = wrap_around(start_s - start_v * UPDATE_INTERVAL);
+    int smallest_start_index = 0; // default 0
+    if (start_s < prev_s)
+      {
+        smallest_start_index = 1;
+        cout << "start_s <= prev_s start_s | prev_s: "
+             << start_s << "|" << prev_s << "; ";
+      }
+    double prev_x, prev_y;
+
+    // first two points of coarse trajectory, to ensure spline begins smoothly
+    if (2 <= remaining_path_adopted_size) {
+      prev_x = (remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
+      prev_y = (remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
+    } else {
+      prev_s = wrap_around(start_s - 1);
+      prev_x = start_x - cos(start_yaw);
+      prev_y = start_y - sin(start_yaw);
+    }
+
+    // last two points of coarse trajectory, use target_d and current s + 30,60
+    double target_1_s = (start_s + 30);
+    if (MAX_S <= target_1_s)
+      {
+        smallest_start_index = 2;
+        target_1_s -= MAX_S;
+      }
+    double target_d1 = lane_center_d(decision.lane_index_changed_to);
+    vector<double> target_xy1 = getXY(target_1_s, target_d1,
+                                      waypoints_maps._s,
+                                      waypoints_maps._x,
+                                      waypoints_maps._y);
+    double target_1_x = target_xy1[0];
+    double target_1_y = target_xy1[1];
+    double target_2_s = (target_1_s + 30);
+    if (MAX_S <= target_2_s)
+      {
+        smallest_start_index = 3;
+        target_2_s -= MAX_S;
+      }
+    double target_d2 = target_d1;
+    vector<double> target_xy2 = getXY(target_2_s, target_d2,
+                                      waypoints_maps._s,
+                                      waypoints_maps._x,
+                                      waypoints_maps._y);
+    double target_2_x = target_xy2[0];
+    double target_2_y = target_xy2[1];
+    vector<double> coarse_s_traj, coarse_x_traj, coarse_y_traj;
+
+    // arrange the seeding trajectory points to ensure coarse_s_traj has
+    // increasing order
+    map<string, map<string, double> > seeds =
+      {
+        {"prev",     {{"s", prev_s},     {"x", prev_x},     {"y", prev_y}}},
+        {"start",    {{"s", start_s},    {"x", start_x},    {"y", start_y}}},
+        {"target_1", {{"s", target_1_s}, {"x", target_1_x}, {"y", target_1_y}}},
+        {"target_2", {{"s", target_2_s}, {"x", target_2_x}, {"y", target_2_y}}}
+      };
+    map<string, vector<double>* > trajs =
+      {
+        {"s", &coarse_s_traj},
+        {"x", &coarse_x_traj},
+        {"y", &coarse_y_traj}
+      };
+
+    for (string sxy: {"s", "x", "y"})
+      {
+        // cout << "case : " << smallest_start_index << "; ";
+
+        cout << "re-arranged: ";
+        switch (smallest_start_index)
+          {
+          case 0:
+            for (string p: {"prev", "start", "target_1", "target_2"})
+              {
+                trajs[sxy]->push_back(seeds[p][sxy]);
+              }
+            break;
+          case 1:
+            for (string p: {"start", "target_1", "target_2", "prev"})
+              {
+                // cout << seeds[p][sxy] << ", ";
+                trajs[sxy]->push_back(seeds[p][sxy]);
+              }
+            break;
+          case 2:
+            for (string p: {"target_1", "target_2", "prev", "start"})
+              {
+                trajs[sxy]->push_back(seeds[p][sxy]);
+              }
+            break;
+          case 3:
+            for (string p: {"target_2", "prev", "start", "target_1"})
+              {
+                trajs[sxy]->push_back(seeds[p][sxy]);
+              }
+            break;
+          default:
+            cout << "Illegal index of the smallest s value. ";
+          }
+      }
+    cout << " coarse_s_traj.size(): " << coarse_s_traj.size() << "; " << endl;
+
+    // next s values
+    vector<double> interpolated_s_traj, interpolated_x_traj, interpolated_y_traj;
+    double target_v = decision.projected_kinematics.v; // best_target[0][1];
+    double next_s = start_s;
+    // double prev_updated_s = -MAX_S; // impossibly small
+
+    double next_v = start_v;
+    // cout << " next_v: ";
+    for (int i = 0; i < new_traj_size; i++) {
+      double v_incr = 0;
+      next_s += next_v * UPDATE_INTERVAL;
+      // prevent non-increasing s values:
+      next_s = wrap_around(next_s);
+      // if (next_s <= prev_updated_s)
+      //   break;
+      // prev_updated_s = next_s;
+      // cout << setw(5) << next_v << ", ";
+      interpolated_s_traj.push_back(next_s);
+      if (fabs(target_v - next_v) < 2 * VELOCITY_INCREMENT_LIMIT) {
+        v_incr = 0;
+      } else {
+        // arrived at VELOCITY_INCREMENT_LIMIT value empirically
+        v_incr =
+          (target_v - next_v)/(fabs(target_v - next_v)) * VELOCITY_INCREMENT_LIMIT;
+      }
+      next_v += v_incr;
+    }
+    cout << " coarse_s_traj: ";
+    for (auto s: coarse_s_traj)
+      {
+        cout << s << ", ";
+      }
+    cout << endl;
+
+    interpolated_x_traj =
+      interpolate_points(coarse_s_traj, coarse_x_traj, interpolated_s_traj);
+    interpolated_y_traj =
+      interpolate_points(coarse_s_traj, coarse_y_traj, interpolated_s_traj);
+
+    // add previous path, if any, to next path
+    // Start with the adopted portion of the previous path points from last time
+    for (int i = 0; i < remaining_path_adopted_size; i++) {
+      trajectory.x_vals.push_back(remaining_trajectory.x_vals[i]);
+      trajectory.y_vals.push_back(remaining_trajectory.y_vals[i]);
+    }
+
+    // add xy points from newly generated path
+    // Fill up the rest of the points for the planner
+    for (int i = 0; i < interpolated_s_traj.size(); i++) {
+      trajectory.x_vals.push_back(interpolated_x_traj[i]);
+      trajectory.y_vals.push_back(interpolated_y_traj[i]);
+    }
+    return trajectory;
+  }
+#+END_SRC
+
 ** congestion characterization
 
    This models the congestion condition between two cars, the front and the behind, on the same lane, supposing if my_car would be in that lane.
@@ -717,7 +762,7 @@ For the case, when the front car is slower, the distance is going to reduce over
 the distance becomes not acceptable.
 
    #+NAME:congestion
-   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+   #+BEGIN_SRC C++ :noweb tangle :tangle
      double start_distance_congestion(double dist_start)
      {
        return exp(-max(dist_start/SAFE_DISTANCE, 0.0) );
@@ -742,8 +787,9 @@ the distance becomes not acceptable.
        double dist_start = (front.s - behind.s) + (front.v - behind.v)*start_time;
        if (behind.v <= front.v)
          {
-           c = start_distance_congestion(dist_start); //exp(-max(dist_start, 0.0)*start_time);
-           cout << " start_time: " << setw(5) << start_time << ", front faster, dist_start: "
+           c = start_distance_congestion(dist_start);
+           cout << " start_time: " << setw(5) << start_time
+                << ", front faster, dist_start: "
                 << setw(7) << dist_start << " c: " << setw(7) << c << "; ";
          } else
          { // behind.v > front.v
@@ -759,10 +805,12 @@ the distance becomes not acceptable.
              { // dist_start > SAFE_DISTANCE
                // with equation:
                // dist = (front.s - behind.s) + (front.v - behind.v)* t = SAFE_DISTANCE
-               // time_threshold should be when the projected distance between the front and the behind
-               // would equal to SAFE_DISTANCE
-               double time_threshold = (SAFE_DISTANCE - (front.s - behind.s)) / (front.v - behind.v);
-               cout << "front slower, and start wtih more than safe distance, time_threshold: "
+               // time_threshold should be when the projected distance
+               // between the front and the behind would equal to SAFE_DISTANCE
+               double time_threshold =
+                 (SAFE_DISTANCE - (front.s - behind.s)) / (front.v - behind.v);
+               cout <<
+                 "front slower, and start wtih more than safe distance, time_threshold: "
                     << setw(7) << time_threshold << " c: " << setw(7) << c <<"; ";
                assert(start_time <= time_threshold); // by the model's reasoning
                c = threshold_congestion(time_threshold, start_time);
@@ -788,7 +836,7 @@ For each plausible maneuver options, =evaluate_decision= performs the analysis a
 Then the decision with the lowest cost will be selected as the decision.
 
 #+NAME:maneuver
-#+BEGIN_SRC C++ :noweb no :tangle :exports none
+#+BEGIN_SRC C++ :noweb no :tangle
   Decision maneuver_f(Car my_car, DATA_LANES data_lanes) {
     vector<MANEUVER> states;
     if (!data_lanes.car_crashing_front_or_behind) {
@@ -828,35 +876,41 @@ Then the decision with the lowest cost will be selected as the decision.
 Compute the decision should the maneuver is performed.
 
 #+NAME:project_maneuver
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  Decision project_maneuver(MANEUVER proposed_maneuver, Car my_car, DATA_LANES data_lanes) {
+#+BEGIN_SRC C++ :noweb tangle :tangle
+  Decision project_maneuver(MANEUVER proposed_maneuver, Car my_car,
+                            DATA_LANES data_lanes) {
     Decision decision;
     int changed_lane = my_car.lane_index;
 
     switch(int(proposed_maneuver)) {
     case int(KL):
-      decision.projected_kinematics = kinematic_required_in_front(my_car, data_lanes, my_car.lane_index);
+      decision.projected_kinematics =
+        kinematic_required_in_front(my_car, data_lanes, my_car.lane_index);
       decision.lane_index_changed_to = my_car.lane_index;
       break;
     case int(LCL):
       changed_lane = my_car.lane_index-1;
-      decision.projected_kinematics = kinematic_required_in_front(my_car, data_lanes, changed_lane);
+      decision.projected_kinematics =
+        kinematic_required_in_front(my_car, data_lanes, changed_lane);
       decision.lane_index_changed_to = changed_lane;
       break;
     case int(LCR):
       changed_lane = my_car.lane_index+1;
-      decision.projected_kinematics = kinematic_required_in_front(my_car, data_lanes, changed_lane);
+      decision.projected_kinematics =
+        kinematic_required_in_front(my_car, data_lanes, changed_lane);
       decision.lane_index_changed_to = changed_lane;
       break;
     case int(PLCL):
       decision.lane_index_changed_to = my_car.lane_index;
       // no lane change yet, but evaluate with the proposed change
-      decision.projected_kinematics = kinematic_required_behind(my_car, data_lanes, my_car.lane_index -1);
+      decision.projected_kinematics =
+        kinematic_required_behind(my_car, data_lanes, my_car.lane_index -1);
       break;
     case int(PLCR):
       decision.lane_index_changed_to = my_car.lane_index;
       // no lane change yet, but evaluate with the proposed change
-      decision.projected_kinematics = kinematic_required_behind(my_car, data_lanes, my_car.lane_index +1);
+      decision.projected_kinematics =
+        kinematic_required_behind(my_car, data_lanes, my_car.lane_index +1);
       break;
     default:
       cout << "Not supported proposed state: " << proposed_maneuver << endl;
@@ -864,8 +918,9 @@ Compute the decision should the maneuver is performed.
     };
     decision.maneuver = proposed_maneuver;
     cout // <<  "prop. man.: "
-         << setw(5) << state_str(decision.maneuver) << ", " << " to: " << decision.lane_index_changed_to << ", ";
-    return decision;              // this decision's state needs to be evaluated
+         << setw(5) << state_str(decision.maneuver) << ", " << " to: "
+         << decision.lane_index_changed_to << ", ";
+    return decision;
   }
 #+END_SRC
 ** kinematic_required_in_front
@@ -885,7 +940,7 @@ Compute the decision should the maneuver is performed.
     This is an experimental design. I have not found better approximation yet given the time limit.
 
 #+NAME:kinematic_required_in_front
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
 
 
   KINEMATIC_DATA kinematic_required_in_front
@@ -911,10 +966,10 @@ Compute the decision should the maneuver is performed.
 #+END_SRC
 
 #+NAME:projected_gap
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double projected_gap_front(double front_s, double front_v,
-                             double behind_s, double behind_v, double behind_a,
-                             double delta_t)
+                            double behind_s, double behind_v, double behind_a,
+                            double delta_t)
   {
     double gap = front_s - behind_s + (front_v - behind_v)*delta_t +
       - 0.5*behind_a*(delta_t * delta_t) - VEHICLE_LENGTH;
@@ -936,14 +991,16 @@ Compute the decision should the maneuver is performed.
     if (behind.empty) {
       kinematic->gap_behind = SAFE_DISTANCE; // extremely large
     } else {
-      kinematic->gap_behind =
-        projected_gap_behind(behind.s, behind.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
+      kinematic->gap_behind = projected_gap_behind
+        (behind.s, behind.v, my_car.s,
+         kinematic->v, kinematic->a, kinematic->horizon);
     }
     if (front.empty) {
       kinematic->gap_front = SAFE_DISTANCE; // extremely large
     } else {
-      kinematic->gap_front =
-        projected_gap_front(front.s, front.v, my_car.s, kinematic->v, kinematic->a, kinematic->horizon);
+      kinematic->gap_front = projected_gap_front
+        (front.s, front.v, my_car.s,
+         kinematic->v, kinematic->a, kinematic->horizon);
     }
   }
 
@@ -957,36 +1014,40 @@ Compute the decision should the maneuver is performed.
    It's currently no being used, as the maneuvers of PLCL and PLCR (prepare change lane left/right) are not being considered.
 
    #+NAME:kinematic_required_behind
-   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-     //map<string, double>
-     KINEMATIC_DATA kinematic_required_behind
-     (Car my_car, DATA_LANES data_lanes, int lane_index) {
-       KINEMATIC_DATA kinematic;
-       if (data_lanes.lanes[lane_index].nearest_back.empty) {
-         kinematic.a = my_car.a;
-         kinematic.v = my_car.v;
-       } else {
-         double gap_behind = my_car.s - data_lanes.lanes[lane_index].nearest_back.s;
-         if (gap_behind <= 0) { // invalid with assumption that the other car is behind
-           kinematic.a = my_car.a;
-           kinematic.v = my_car.v;
-         } else {
-           double delta_v =
-             my_car.v - data_lanes.lanes[lane_index].nearest_back.v;
-           double min_acceleration_pushed_by_nearest_back =
-             (delta_v*delta_v)/(2*gap_behind);
-           kinematic.a =
-             min(min_acceleration_pushed_by_nearest_back,
-                 my_car.a + MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-           kinematic.v = min(data_lanes.lanes[lane_index].nearest_front.v,
-                             my_car.v + kinematic.a * UPDATE_INTERVAL); // kinematic.v is used per UPDATE_INTERVAL
-         }}
-       update_gaps_in_kinematic(data_lanes.lanes[lane_index].nearest_front,
-                                my_car,
-                                data_lanes.lanes[lane_index].nearest_back,
-                                10*UPDATE_INTERVAL, &kinematic);
-       return kinematic;
-     }
+   #+BEGIN_SRC C++ :noweb tangle :tangle
+               //map<string, double>
+               KINEMATIC_DATA kinematic_required_behind
+               (Car my_car, DATA_LANES data_lanes, int lane_index) {
+                 KINEMATIC_DATA kinematic;
+                 if (data_lanes.lanes[lane_index].nearest_back.empty) {
+                   kinematic.a = my_car.a;
+                   kinematic.v = my_car.v;
+                 } else {
+                   double gap_behind =
+                     my_car.s - data_lanes.lanes[lane_index].nearest_back.s;
+                   if (gap_behind <= 0)
+                     { // invalid with assumption that the other car is behind
+                     kinematic.a = my_car.a;
+                     kinematic.v = my_car.v;
+                   } else {
+                     double delta_v =
+                       my_car.v - data_lanes.lanes[lane_index].nearest_back.v;
+                     double min_acceleration_pushed_by_nearest_back =
+                       (delta_v*delta_v)/(2*gap_behind);
+                     kinematic.a =
+                       min(min_acceleration_pushed_by_nearest_back,
+                           my_car.a +
+                           MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
+                     kinematic.v = min(data_lanes.lanes[lane_index].nearest_front.v,
+                                       my_car.v + kinematic.a * UPDATE_INTERVAL);
+                     // kinematic.v is used per UPDATE_INTERVAL
+                   }}
+                 update_gaps_in_kinematic(data_lanes.lanes[lane_index].nearest_front,
+                                          my_car,
+                                          data_lanes.lanes[lane_index].nearest_back,
+                                          10*UPDATE_INTERVAL, &kinematic);
+                 return kinematic;
+               }
    #+END_SRC
 
 ** calculate_cost
@@ -1008,16 +1069,21 @@ The data required:
 
 
 #+NAME:calculate_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double calculate_cost(Decision decision, Car my_car, DATA_LANES data_lanes) {
     // cout << " lane: " << decision.lane_index_changed_to;
-    double collision_cost         = COLLISION_C *   collision_cost_f(decision, my_car, data_lanes);
-    double inefficiency_cost      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
-    double buffer_cost            = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
-    double not_middle_cost        = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
-    double lane_change_extra_cost = LANE_CHANGE_C * lane_change_extra_cost_f(my_car, decision);
-    double cost
-      = collision_cost + buffer_cost + inefficiency_cost + not_middle_cost + lane_change_extra_cost;
+    double collision_cost
+      = COLLISION_C *   collision_cost_f(decision, my_car, data_lanes);
+    double inefficiency_cost
+      = EFFICIENCY_C *  inefficiency_cost_f(decision, my_car, data_lanes);
+    double buffer_cost
+      = DANGER_C *      buffer_cost_f(decision, my_car, data_lanes);
+    double not_middle_cost
+      = NOT_MIDDLE_C *  not_middle_cost_f(decision, my_car, data_lanes);
+    double lane_change_extra_cost
+      = LANE_CHANGE_C * lane_change_extra_cost_f(my_car, decision);
+    double cost = collision_cost + buffer_cost + inefficiency_cost
+      + not_middle_cost + lane_change_extra_cost;
     cout << "coll. c: " << setw(3) << collision_cost << " buf. c: " << setw(3) << buffer_cost
          << " ineff. c: " << setw(3) << inefficiency_cost << ", ";
     return cost;
@@ -1029,7 +1095,7 @@ The data required:
     Use the current acceleration and velocity of my_car to asses collision risk in more realistic than using those the projected ones.
 
 #+NAME:collision_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
   {
     if (data_lanes.car_crashing_front_or_behind)
@@ -1048,7 +1114,7 @@ Model the extent how much my_car's velocity can reach the speed limit.
 It calculates the difference between the speed limit and my_car's projected speed by the maneuver.
 
 #+NAME:inefficiency_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double inefficiency_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
     double projected_v = decision.projected_kinematics.v;
     // expect the speed can match SPEED_LIMIT in 1 UPDATE_INTERVAL seconds
@@ -1063,14 +1129,14 @@ It calculates the difference between the speed limit and my_car's projected spee
 It models the degree of congestion with the nearest car behind and in front.
 
 #+NAME:buffer_cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double buffer_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
   { // express the requirements that both the gap_front and gap_behind should be
     // larger or equal to SAFE_DISTANCE.
 
     double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
     double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
-    return cost_front + 1.0 * cost_behind; // might want to consider if the gap_front should have bigger weight.
+    return cost_front + 1.0 * cost_behind;
   }
 #+END_SRC
 
@@ -1078,7 +1144,7 @@ It models the degree of congestion with the nearest car behind and in front.
 ** not-middle-cost
 
 #+NAME:not-middle-cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double not_middle_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
     // favor the middle lane, to have more options to change lane when needed
     return logistic(fabs(decision.lane_index_changed_to - 2));
@@ -1092,13 +1158,77 @@ It models the degree of congestion with the nearest car behind and in front.
    I might want to considered some "inertia" factor for my_car to stay in a lane for a while after changing into the lane.
 
 #+NAME:lane_change_extra_cost_f
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle
   double lane_change_extra_cost_f(Car my_car, Decision decision) {
     if ((decision.maneuver == LCL) || (decision.maneuver == LCR))
       return exp(-fabs(my_car.v));
     else
       return 0;
   }
+#+END_SRC
+
+** car-constants
+
+Here are the parameters for the path planner.
+
+#+NAME:car-constants
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/parameters.h :main no
+  #ifndef PARAMETERS
+  #define PARAMETERS
+
+  /*
+    parameters.h
+    The parameters for path planning design.
+
+  ,*/
+  const double METERS_PER_SECOND_IN_MPH = 1609.344/3600;
+  double mph_2_meterps(double mph) {
+    double meter_per_seconds = mph*METERS_PER_SECOND_IN_MPH;
+    return meter_per_seconds;
+  }
+  const double SPEED_LIMIT = mph_2_meterps(49.0); // mph the top speed allowed
+  const int NUM_LANES = 3;
+  // The max s value before wrapping around the track back to 0
+  const double MAX_S = 6945.554;
+
+  const double VEHICLE_LENGTH = 3.0; // meters,
+  //23 meters is the maximum vehicle length, according to California highway standard
+  // const double BUFFER_ZONE = 10*VEHICLE_LENGTH;
+  const double NEARBY = 1*VEHICLE_LENGTH; // metres, very near to my_car
+
+  const double UPDATE_INTERVAL = 0.02; // seconds,
+  // the interval to update maneuver decision
+
+  const int PLANNED_TRAJECTORY_LENGTH = 50; // 3;
+  // the length of the planned trajectory fed to the simulator
+  const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 50; // 3, 30;
+  // the length of the first portion of the remaining trajectory (previous_path)
+  // from experiment, it seems 25 might be too few when the CPU is busy.
+
+  const double VELOCITY_INCREMENT_LIMIT = 0.125; // 0.07 not stable
+
+  const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
+  const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
+  = MAX_ACCELERATION_METERS_PER_SECOND_SQUARE * UPDATE_INTERVAL;
+
+  const double MAX_JERK_METERS_PER_SECOND_CUBIC = 10; // meter/s^3
+  const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
+  = MAX_JERK_METERS_PER_SECOND_CUBIC * UPDATE_INTERVAL;
+  const double COLLISION_C  = .1E6f;
+  const double DANGER_C     = .1E7f;
+  const double EFFICIENCY_C = .1E3f;
+  const double NOT_MIDDLE_C = .1E1f;
+  const double LANE_CHANGE_C= .1E4f;
+  // const double NEAR_ZERO = .1E-1f;
+  // const double DESIRED_TIME_BUFFER = 10; // seconds,
+  // according to http://copradar.com/redlight/factors/ ;
+  // change from 30 to 10 for better differentiation
+  const double SAFE_DISTANCE = 120.0; // meters,
+  // large enough to conisder to be safe to drive at top speed
+
+  const double LANE_CHANGE_INERTIA_C = 1000.0;
+
+  #endif
 #+END_SRC
 
 
@@ -1118,74 +1248,50 @@ Occasionally, it might even have collision.
 2. The adjustment increment of velocity VELOCITY_INCREMENT is very sensitive to the stability of the my_car driving. More
    study is needed.
 
-** Overall design decisions
+* Supporting implementation
 
-   - Use meter per seconds to measure speed
-     As the measure of distance and speed from fusion data is in meters, and the update interval
-     is in seconds (0.02 seconds).
-     The exception is the measurement of the speed of "my_car" (the car being controlled),
-   it's speed is in mph (mile per hour).
+  The following are lower level supporting functions and the actual main program construction.
 
-** Control Parameters
+** Kinematic modules
 
-   There are mainly two control choices at the each interval (UPDATE_INTERVAL seconds):
-   - lane
-   - acceleration/deceleration
+   Computes kinematics with my_car and in relationship to the other cars
 
-   Changing lane would be desirable if the controlled car have to severely slowdow or even being crashed in the current line.
-   The acceleration/deceleration should be adjusted to be safe, fast and comfortable.
+#+NAME:kinematics-module
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/kinematics.h :main no
+  <<projected_gap>>
+  <<congestion>>
+  <<parse-fusion-data>>
+  <<kinematic_required_in_front>>
+  <<kinematic_required_behind>>
+#+END_SRC
 
-   The seems that changing lane is more fundamental maneuver, I'll focus on it while assuming a constant acceleration/deceleration
-   for now. Given the short interval of UPDATE_INTERVAL second control interval, it may be OK to assume small constant acceleration/deceleration.
-   The assumption has been partially confirmed in experiment.
-   The acceleration/deceleration is assumed to be (+2.24m/s^2 or -2.24/s^2).
+** maneuvers modules
 
-   The high level code will reflect two control parameters in anticipation for fuller refined implementation.
-** Selection of Lane
+#+NAME:maneuvers-module
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/maneuvers.h :main no
+  <<project_maneuver>>
+  <<collision_cost>>
+  <<buffer_cost>>
+  <<inefficiency_cost>>
+  <<not-middle-cost>>
+  <<lane_change_extra_cost_f>>
+  <<calculate_cost>>
+  <<maneuver>>
+#+END_SRC
 
-   Assuming the acceleration/deceleration controlled to maximize the speed within legal limit, the major consideration of selection of a lane,
-   is to avoid collision without too much slowing down. Given other considerations being equal, changing lane may involve additional collision
-   risk, and overhead.
+** trajectory modules
 
-   Therefore, the control problem would be modeled by cost function, and the control solution should have the lowest cost among all the legal lane choices.
-   The cost function would have the following components:
-   - collision cost
-   - changing lane cost
-*** Collision Cost
-    The collision cost reflects the risks of collision.
-    The risk of collision has 4 scenarios:
-    - Longitudinal collision:
-      - collision with the car in front
-      - collision by the car in the back
-    - Lateral collision:
-      - collision by the car in the left
-      - collision by the car in the right
+#+NAME:trajectory-module
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/trajectory.h :main no
+  <<refine_maps>>
+  <<trajectory>>
+#+END_SRC
 
-    The longitudinal collision can be characterized the overlapping of vehicles' body from the moment of evaluation to the foreseeable future.
-
-*** Changing lane cost
-
-    Changing lane cost may have one major components and one minor component.
-    The major components is the lateral collision risk. It will be proportional to the collision cost then.
-
-    The minor component is the overhead and discomfort caused. This is hard to estimate. It will be assumed as a constant for now.
-
-** Avoiding lateral collision and interference
-
-   It's not desirable to be next to another car in the adjacent lane.
-   This problem can only solved by adjusting the acceleration/deceleration.
-   Thus, this is a case that should be considered with adjustment of acceleration/deceleration.
-
-   It will be less likely, and will be a refinement to do in the future.
-
-
-* Supporting functions
-
-** Decorations
-   Necessary decorations to make the code compile.
+** Assembly Decorations
+  Here it assembles the required modules of kinematics, maneuvers, and trajectory
 
    #+NAME:decorations
-   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+   #+BEGIN_SRC C++ :noweb tangle :tangle
      #include <assert.h> // #include <assert> does not work, why?
 
      #include <iomanip>
@@ -1207,6 +1313,10 @@ Occasionally, it might even have collision.
      #include "spline.h"
      #include "parameters.h"
      #include "utils.h"
+     #include "data_model.h"
+     #include "kinematics.h"
+     #include "maneuvers.h"
+     #include "trajectory.h"
 
      using namespace std;
 
@@ -1214,138 +1324,15 @@ Occasionally, it might even have collision.
      using json = nlohmann::json;
 
    #+END_SRC
-** support-to-maneuver
-
-#+NAME:support-to-maneuver
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  template <typename T>
-  void vector_remove(vector<T> & a_vector, T value) {
-    a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
-  }
-
-  template <typename T>
-  typename T::iterator min_map_element(T& m) {
-    return min_element(m.begin(), m.end(),
-                       [](typename T::value_type& l,
-                          typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
-  }
-
-  // constexpr unsigned int str2int(const char* str, int h = 0)
-  // {
-  //   return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
-  // }
-
-#+END_SRC
-
-** car-constants
-#+NAME:car-constants
-#+BEGIN_SRC C++ :noweb yes :tangle ./src/parameters.h :exports none :main no
-  #ifndef PARAMETERS
-  #define PARAMETERS
-
-  /*
-    parameters.h
-    The parameters for path planning design.
-
-  ,*/
-  const double METERS_PER_SECOND_IN_MPH = 1609.344/3600;
-  double mph_2_meterps(double mph) {
-    double meter_per_seconds = mph*METERS_PER_SECOND_IN_MPH;
-    return meter_per_seconds;
-  }
-  const double SPEED_LIMIT = mph_2_meterps(49.0); // mph the top speed allowed
-  const int NUM_LANES = 3;
-  // The max s value before wrapping around the track back to 0
-  const double MAX_S = 6945.554;
-
-  const double VEHICLE_LENGTH = 3.0; // meters, 23 meters is the maximum vehicle length, according to California highway standard
-  // const double BUFFER_ZONE = 10*VEHICLE_LENGTH;
-  const double NEARBY = 1*VEHICLE_LENGTH; // metres, very near to my_car
-
-  const double UPDATE_INTERVAL = 0.02; // seconds, the interval to update maneuver decision
-
-  const int PLANNED_TRAJECTORY_LENGTH = 50; // 3; // the length of the planned trajectory fed to the simulator
-  // In the current implementation, PLANNED_TRAJECTORY_LENGTH cannot be larger than 10. It might be a bug in the implementation.
-  const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 50; // 3, 30;
-  // the length of the first portion of the remaining trajectory (previous_path)
-  // from experiment, it seems 25 might be too few when the CPU is busy.
-
-  const double VELOCITY_INCREMENT_LIMIT = 0.125; // 0.07 not stable
-
-  const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
-  const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
-  = MAX_ACCELERATION_METERS_PER_SECOND_SQUARE * UPDATE_INTERVAL;
-  // const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL = 0.015; // The above seems too big still
-
-  const double MAX_JERK_METERS_PER_SECOND_CUBIC = 10; // meter/s^3
-  const double MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL
-  = MAX_JERK_METERS_PER_SECOND_CUBIC * UPDATE_INTERVAL;
-  const double COLLISION_C  = .1E6f;
-  const double DANGER_C     = .1E7f;
-  const double EFFICIENCY_C = .1E3f;
-  const double NOT_MIDDLE_C = .1E1f;
-  const double LANE_CHANGE_C= .1E4f;
-  const double NEAR_ZERO = .1E-1f;
-  const double DESIRED_TIME_BUFFER = 10; // seconds, according to http://copradar.com/redlight/factors/ ; change from 30 to 10 for better differentiation
-  const double SAFE_DISTANCE = 120.0; // meters, huge number for indefinite futrue time
-
-  const double LANE_CHANGE_INERTIA_C = 1000.0;
-
-  #endif
-#+END_SRC
-
-** car-parameters
-#+NAME:car-parameters
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+** persistent-car-declaration
+#+NAME:persistent-car-declaration
+#+BEGIN_SRC C++ :noweb tangle :tangle
   // double ref_val = MAX_VELOCITY_DELTA_PRE_PLANNING_INTERVAL; // initial
   Car my_car;
   my_car.a = 0;
   my_car.jerk = 0;
 
 #+END_SRC
-** interpolate_points_function
-
-#+NAME:interpolate_points_function
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
-                                    vector<double> eval_at_x) {
-    // uses the spline library to interpolate points connecting a series of x and y values
-    // output is spline evaluated at each eval_at_x point
-
-    if (pts_x.size() != pts_y.size()) {
-      cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
-      return { 0 };
-    }
-
-    tk::spline s;
-    s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
-    vector<double> output;
-    for (double x: eval_at_x) {
-      output.push_back(s(x));
-    }
-    return output;
-  }
-
-  vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
-                                    double interval, int output_size) {
-    // uses the spline library to interpolate points connecting a series of x and y values
-    // output is output_size number of y values beginning at y[0] with specified fixed interval
-
-    if (pts_x.size() != pts_y.size()) {
-      cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
-      return { 0 };
-    }
-
-    tk::spline s;
-    s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
-    vector<double> output;
-    for (int i = 0; i < output_size; i++) {
-      output.push_back(s(pts_x[0] + i * interval));
-    }
-    return output;
-  }
-    #+END_SRC
-
 ** main
 
 *** load-waypoint-data
@@ -1359,7 +1346,7 @@ Here are the data from the map file:
   - vector<double> map_waypoints_dy;
 
 #+NAME:load-waypoint-data
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle :exports none
 // Load up map values for waypoint's x,y,s and d normalized normal vectors
   vector<double> map_waypoints_x;
   vector<double> map_waypoints_y;
@@ -1397,7 +1384,7 @@ Here are the data from the map file:
     Improve the resolution of waypoint maps.
 
 #+NAME:refine_maps
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle :exports none
 
   struct WAYPOINTS_MAP {
     vector<double> _x;
@@ -1406,25 +1393,6 @@ Here are the data from the map file:
     vector<double> _dx;
     vector<double> _dy;
   };
-
-  // vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
-  //                                   double interval, int output_size) {
-  //   // uses the spline library to interpolate points connecting a series of x and y values
-  //   // output is output_size number of y values beginning at y[0] with specified fixed interval
-
-  //   if (pts_x.size() != pts_y.size()) {
-  //     cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
-  //     return { 0 };
-  //   }
-
-  //   tk::spline s;
-  //   s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
-  //   vector<double> output;
-  //   for (int i = 0; i < output_size; i++) {
-  //     output.push_back(s(pts_x[0] + i * interval));
-  //   }
-  //   return output;
-  // }
 
   int NUM_WAYPOINTS_BEHIND = 5;
   int NUM_WAYPOINTS_AHEAD  = 5;
@@ -1477,16 +1445,8 @@ Here are the data from the map file:
     refined_maps._dx = interpolate_points(coarse_waypoints_s, coarse_waypoints_dx, dist_inc, num_interpolation_points);
     refined_maps._dy = interpolate_points(coarse_waypoints_s, coarse_waypoints_dy, dist_inc, num_interpolation_points);
 
-    // refined_maps._s  = map_waypoints_s;
-    // refined_maps._x  = map_waypoints_x;
-    // refined_maps._y  = map_waypoints_y;
-    // refined_maps._dx = map_waypoints_dx;
-    // refined_maps._dy = map_waypoints_dy;
-
     return refined_maps;
   }
-
-  // Next to resolve the compilation dependency.
 
 #+END_SRC
 
@@ -1525,31 +1485,12 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
 
 *** main
 #+NAME:main.cpp
-#+BEGIN_SRC C++ :noweb yes :tangle ./src/main.cpp :exports none
+#+BEGIN_SRC C++ :noweb tangle :tangle ./src/main.cpp
   <<decorations>>
-  <<parse-fusion-data-declaration>>
-  <<interpolate_points_function>>
-  <<projected_gap>>
-  <<congestion>>
-  <<parse-fusion-data>>
-  <<kinematic_required_in_front>>
-  <<kinematic_required_behind>>
-  <<project_maneuver>>
-  <<logistic>>
-  <<collision_cost>>
-  <<buffer_cost>>
-  <<inefficiency_cost>>
-  <<not-middle-cost>>
-  <<lane_change_extra_cost_f>>
-  <<calculate_cost>>
-  <<support-to-maneuver>>
-  <<maneuver>>
-  <<refine_maps>>
-  <<trajectory>>
 
   int main() {
     <<load-waypoint-data>>
-    <<car-parameters>>
+    <<persistent-car-declaration>>
 
     int update_count = 0; // used to debug to capture the first trace
     uWS::Hub h;
@@ -1588,223 +1529,65 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
   }
 #+END_SRC
 
-* Reminder: need to deal with case when there is no car in front or back
-  Here are the cases that I have considered:
-  - acceleration_required_behind
-  - acceleration_required_in_front
-  - collision_cost
-  - buffer_cost
-  -
+** Other design decisions
 
-    The inefficiency cost should not have dependancy to cars in front or behind.
+   - Use meter per seconds to measure speed
+     As the measure of distance and speed from fusion data is in meters, and the update interval
+     is in seconds (0.02 seconds).
+     The exception is the measurement of the speed of "my_car" (the car being controlled),
+   it's speed is in mph (mile per hour).
+** Control Parameters
 
-* Whether I should make data lanes persistent to achieve acceleration and data smoothing?
+   There are mainly two control choices at the each interval (UPDATE_INTERVAL seconds):
+   - lane
+   - velocity/acceleration/deceleration
 
+   Changing lane would be desirable if the controlled car have to severely slowdow or even being crashed in the current line.
+   The acceleration/deceleration should be adjusted to be safe, fast and comfortable.
 
-* Done
+   It seems that changing lane is more fundamental maneuver, I'll focus on it while assuming a constant acceleration/deceleration
+   for now. Given the short interval of UPDATE_INTERVAL second control interval, it may be OK to assume small constant acceleration/deceleration.
+   The assumption has been partially confirmed in experiment.
+   The acceleration/deceleration is assumed to be (+2.24m/s^2 or -2.24/s^2).
 
-Add the design of using the first part of the remaining trajectory, and the associated time delay.
+** Selection of Lane
 
-Note, in my implementation, I might need to introduce the concept and value of the start of new trajectory,
-  as I'm using the first part of remaining trajectory, which takes some time, thus the position of the other vehicles,
-as well as Ego's new trajectory should start at the time after those adopted remaining trajectory being used up.
-  Each point in the trajectory spans UPDATE_INTERVAL, then the time it would be:
-  UPDATE_INTERVAL * NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS
+   Assuming the acceleration/deceleration controlled to maximize the speed within legal limit,
+   the major consideration of selection of a lane,
+   is to avoid collision without too much slowing down.
+   Given other considerations being equal, changing lane may involve additional collision
+   risk, and overhead.
 
-Note, the concept of PLANNING horizon may need to be questioned, I revert back the preference of using UPDATE_INTERVAL as the base.
+   Therefore, the control problem would be modeled by cost function, and
+   the control solution should have the lowest cost among all the legal lane choices.
+   The cost function would have the following components:
+   - collision cost
+   - changing lane cost
+*** Collision Cost
+    The collision cost reflects the risks of collision.
+    The risk of collision has 4 scenarios:
+    - Longitudinal collision:
+      - collision with the car in front
+      - collision by the car in the back
+    - Lateral collision:
+      - collision by the car in the left
+      - collision by the car in the right
 
-Note, I may need to evaluate the cost/risk in terms of multiple interval of horizon, beyond just one interval.
-This might be the intuition of "PLANNING" concept. But it's not just not large interval of PLANNING.
+    The longitudinal collision can be characterized the overlapping of vehicles' body from the moment of evaluation to the foreseeable future.
 
-The current approach of using initial speed of ref_val to create the spacing in the trajectory, especially assume that the speed is
-constant! The example's approach might be more reasonable.
+*** Changing lane cost
 
-* Todo
+    Changing lane cost may have one major components and one minor component.
+    The major components is the lateral collision risk. It will be proportional to the collision cost then.
 
-Now the problem of not considering to change the lanes has been solved.
+    The minor component is the overhead and discomfort caused. This is hard to estimate. It will be assumed as a constant for now.
 
-There is another problem that it hesitate to change lane, and may not determined to change.
-Also the lane line is not quite persistent.
+** Avoiding lateral collision and interference
 
-May need to consider the duration to be larger to provide more realistic view of the surrounding.
-Need to fix the problem that the maneuver selection does not make sense, by reviewing the cost functions' design.
+   It's not desirable to be next to another car in the adjacent lane.
+   This problem can only solved by adjusting the acceleration/deceleration.
+   Thus, this is a case that should be considered with adjustment of acceleration/deceleration.
 
-* Old code yard
-#+NAME:shortest_path
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-double shortest_distance(Car front, Car behind, double start_time, double end_time)
-{ // compute the shortest distance between the car in front and the behind from start_time to end_time.
-  // To simplify, assume they have zero acceleration
-  double dist;
-  if (front.v <= behind.v)
-    {// the shortest distance would be at the end_time, with the distance will decrease from the start_time to end_time
-      dist = (front.s - behind.s) + (front.v - behind.v)*end_time;
-    } else
-    { // the shortest would be at the start_time
-      dist = (front.s - behind.s) + (front.v - behind.v)*start_time;
-    }
-  return max(dist, 0.0); // ensure that it's non-negative. when it's negative, it's already way too close.
-}
+   It will be less likely, and will be a refinement to do in the future.
 
-#+END_SRC
-
-#+NAME:old-kinematic_required_in_front
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-const double SPEED_ADJUSTMENT_PERIOD = 30; // seconds
-double const ONE_OVER_ADJUSTMENT_INTERVAL_SQUARE =
-  1/(SPEED_ADJUSTMENT_PERIOD * SPEED_ADJUSTMENT_PERIOD);
-double const ONE_OVER_ADJUSTMENT_INTERVAL = 1/SPEED_ADJUSTMENT_PERIOD;
-
-// KINEMATIC_DATA kinematic_required_in_front
-// (Car my_car, DATA_LANES data_lanes, int lane_changed_to) {
-//   KINEMATIC_DATA kinematic;
-//   // double acceleration;
-//   double extra_speed_allowed = SPEED_LIMIT - my_car.v;
-//   double speed_limit_allowed_acceleration =
-//     extra_speed_allowed * ONE_OVER_ADJUSTMENT_INTERVAL;
-//   double feasible_acceleration;
-//   // double target_v = SPEED_LIMIT;
-
-//   if (data_lanes.lanes[lane_changed_to].nearest_front.empty) {
-//     feasible_acceleration = speed_limit_allowed_acceleration;
-//     // effective no consideration of the car in frontfs
-//   } else {
-//     double gap_front = data_lanes.lanes[lane_changed_to].nearest_front.s - my_car.s;
-//       // data_lanes.lanes[lane_changed_to].gap_front;
-//     double available_room = gap_front - BUFFER_ZONE;
-//     feasible_acceleration =
-//       available_room * ONE_OVER_ADJUSTMENT_INTERVAL_SQUARE - my_car.v * ONE_OVER_ADJUSTMENT_INTERVAL;
-//   }
-//   if (feasible_acceleration <= 0) {
-//     kinematic.a = feasible_acceleration;
-//     // collision is happening at the time, deceleration immediately
-//     // The time is at the end of the adopted remaining trajectory, and
-//     // the start of new planned trajectory
-//   } else { // 0 < feasible_acceleration
-//     if (speed_limit_allowed_acceleration < 0) { // speeding over limit
-//       double acceleration_delta
-//         = min(fabs(my_car.a - speed_limit_allowed_acceleration),
-//               MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-//       kinematic.a = my_car.a - acceleration_delta;
-//     } else { // 0 <= speed_limit_allowed_acceleration and 0 < feasible_acceleration
-//       kinematic.a
-//         = min(min(speed_limit_allowed_acceleration,
-//                              feasible_acceleration),
-//               my_car.a + MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-//     }}
-//   // Consider the sensed car in front may not be far away
-//   // The Ego's speed shall be at most than that of the car in front
-//   kinematic.v = min(data_lanes.lanes[lane_changed_to].nearest_front.v,
-//                  my_car.v + kinematic.a * UPDATE_INTERVAL); // kinematic.v is used per UPDATE_INTERVAL
-
-//   update_gaps_in_kinematic(data_lanes.lanes[lane_changed_to].nearest_front,
-//                            my_car,
-//                            data_lanes.lanes[lane_changed_to].nearest_back,
-//                            10*UPDATE_INTERVAL, &kinematic);
-//   return kinematic;
-// }
-#+END_SRC
-
-#+NAME:support-to-collision-cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-vector<double> solv_2nd_degree_poly(double a, double b, double c) {
-  double d  = sqrt(b*b -4*a*c);
-  double s1 = (-b + d)/(2*a);
-  double s2 = (-b - d)/(2*a);
-  return {s1, s2};
-}
-
-double collision_time_in_future(double a, double b, double c, double horizon) {
-  vector<double> candidates = solv_2nd_degree_poly(a, b, c);
-  double s0 = candidates[0] + horizon;
-  double s1 = candidates[1] + horizon;
-  double s  = SAFE_DISTANCE;
-  if (0 <= s0) {
-    s = s0;
-  }
-  if ((0 <= s1) && (s1 < s)) {
-    s = s1;
-  }
-  return s;
-}
-#+END_SRC
-
-#+NAME:old-collision-cost
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
-double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
-  double front_collision_cost  = 0;
-  double behind_collision_cost = 0;
-  double gap_front_0  = SAFE_DISTANCE;
-  double gap_behind_0 = SAFE_DISTANCE;
-
-  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
-    gap_front_0 = (data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s - my_car.s);
-  }
-
-  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty) {
-    gap_behind_0 = (my_car.s - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s);
-  }
-  // cout << " lane studied: " << decision.lane_index_changed_to << ", ";
-
-  // if ((SAFE_DISTANCE <= decision.projected_kinematics.gap_front) &&
-  //     (SAFE_DISTANCE <= decision.projected_kinematics.gap_behind)) {
-  //   // for the case, when there is no car in front or behind
-  //   return 0;
-  // }
-  if (data_lanes.car_crashing_front_or_behind)
-    {
-      return 1.0;
-    } else
-    {
-      return 0.0;
-    }
-  // if ((SAFE_DISTANCE <= gap_front_0) &&
-  //     (SAFE_DISTANCE <= gap_behind_0)) {
-  //   // for the case, when there is no car in front or behind
-  //   // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
-  //   return 0;
-  // }
-  // if (gap_front_0  < BUFFER_ZONE ||
-  //     gap_behind_0 < BUFFER_ZONE) {
-  //   cout << " too close, ";
-  //   return 2.0;
-  // }
-
-  // evaluate collision risk with the projected accelerate and speed
-  // over a period of horizon
-  // double a_f = 0.5*decision.projected_kinematics.a;
-  // double a_f   = 0.5*my_car.a;
-  // // double b_f = decision.projected_kinematics.v
-  // double b_f   = my_car.v
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
-  // double c_f   = my_car.s
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
-  // double front_collision_time
-  //   //  = collision_time_in_future(a_f, b_f, c_f, decision.projected_kinematics.horizon);
-  //   = collision_time_in_future(a_f, b_f, c_f, 0.0);
-
-  // front_collision_cost = exp(-pow(front_collision_time, 2));
-  // cout << " coll. in front in " << front_collision_time << " sec. ";
-
-  // // double a_b = 0.5*decision.projected_kinematics.a;
-  // double a_b = 0.5*my_car.a;
-  // // double b_b = decision.projected_kinematics.v
-  // double b_b = my_car.v
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.v;
-  // double c_b = my_car.s
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
-  // double behind_collision_time
-  //   //  = collision_time_in_future(a_b, b_b, c_b, decision.projected_kinematics.horizon);
-  //   = collision_time_in_future(a_b, b_b, c_b, 0.0);
-  // behind_collision_cost = exp(-pow(behind_collision_time, 2));
-  // // cout << " coll. behind in " << behind_collision_time << " sec. ";
-
-  // double cost = front_collision_cost + 1.0*behind_collision_cost; // rear collision is less risky
-  // return cost;
-}
-
-// I'm confused with case of PLCL, and PLCR, on which lane, the collision risk is accessed?
-// It should be on the current lane, not the contemplating lane.
-// Need to double check.
-
-#+END_SRC
+   Currently, it only tries to avoid changing lane when there is a car next to in the adjacent lane.
