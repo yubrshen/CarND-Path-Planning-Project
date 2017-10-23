@@ -12,7 +12,6 @@ double mph_2_meterps(double mph) {
   return meter_per_seconds;
 }
 const double SPEED_LIMIT = mph_2_meterps(49.0); // mph the top speed allowed
-// const double MINIMUM_SPEED = mph_2_meterps(5.0); // the minimum speed to get moving
 const int NUM_LANES = 3;
 // The max s value before wrapping around the track back to 0
 const double MAX_S = 6945.554;

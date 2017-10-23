@@ -793,27 +793,12 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
 
   // first two points of coarse trajectory, to ensure spline begins smoothly
   if (2 <= remaining_path_adopted_size) {
-    // coarse_s_traj.push_back(prev_s);
-    // coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
     prev_x = (remaining_trajectory.x_vals[remaining_path_adopted_size-2]);
-    // coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
     prev_y = (remaining_trajectory.y_vals[remaining_path_adopted_size-2]);
-
-    // coarse_s_traj.push_back(start_s);
-    // coarse_x_traj.push_back(remaining_trajectory.x_vals[remaining_path_adopted_size-1]);
-    // coarse_y_traj.push_back(remaining_trajectory.y_vals[remaining_path_adopted_size-1]);
   } else {
     prev_s = wrap_around(start_s - 1);
     prev_x = start_x - cos(start_yaw);
     prev_y = start_y - sin(start_yaw);
-
-    // coarse_s_traj.push_back(prev_s);
-    // coarse_x_traj.push_back(prev_x);
-    // coarse_y_traj.push_back(prev_y);
-
-    // coarse_s_traj.push_back(start_s);
-    // coarse_x_traj.push_back(start_x);
-    // coarse_y_traj.push_back(start_y);
   }
 
   // last two points of coarse trajectory, use target_d and current s + 30,60
@@ -827,11 +812,6 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
   vector<double> target_xy1 = getXY(target_1_s, target_d1, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
   double target_1_x = target_xy1[0];
   double target_1_y = target_xy1[1];
-
-  // coarse_s_traj.push_back(target_1_s);
-  // coarse_x_traj.push_back(target_1_x);
-  // coarse_y_traj.push_back(target_1_y);
-
   double target_2_s = (target_1_s + 30);
   if (MAX_S <= target_2_s)
     {
@@ -842,11 +822,6 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
   vector<double> target_xy2 = getXY(target_2_s, target_d2, waypoints_maps._s, waypoints_maps._x, waypoints_maps._y);
   double target_2_x = target_xy2[0];
   double target_2_y = target_xy2[1];
-
-  // coarse_s_traj.push_back(target_2_s);
-  // coarse_x_traj.push_back(target_2_x);
-  // coarse_y_traj.push_back(target_2_y);
-
   vector<double> coarse_s_traj, coarse_x_traj, coarse_y_traj;
 
   // arrange the seeding trajectory points to ensure coarse_s_traj has increasing order
@@ -866,7 +841,7 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
 
   for (string sxy: {"s", "x", "y"})
     {
-      cout << "case : " << smallest_start_index << "; ";
+      // cout << "case : " << smallest_start_index << "; ";
 
       cout << "re-arranged: ";
       switch (smallest_start_index)
@@ -880,7 +855,7 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
         case 1:
           for (string p: {"start", "target_1", "target_2", "prev"})
             {
-              cout << seeds[p][sxy] << ", ";
+              // cout << seeds[p][sxy] << ", ";
               trajs[sxy]->push_back(seeds[p][sxy]);
             }
           break;
