@@ -25,9 +25,11 @@ With this style of narrative, key chunks of code relevant to higher level design
 much more thought process presented. This would make the source code much more understandable, removing the challenges of providing
 updated and appropriate comments to the source code.
 
-The full source code can be generated from this literate programming document: ./design-workbook.org
+The full source code can be generated from this literate programming document: [[./design-workbook.org]]
 
 In this design document, "my_car" refers to the car being controlled by the path planner.
+
+There is a companion design-workbook for the utilities used in the implementation: [[./utils.org]]
 
 * Performance
 
