@@ -162,6 +162,8 @@ The congestion with the nearest vehicle would be used to compute the cost of col
 The distance would be calculated based on the time horizon when the new trajectory would start to be used, till the end of the new
 trajectory.
 
+The source code is ./src/data\_model.h
+
 `path-planner-data-model-declaration`:
 
     enum DIRECTION {LEFT = 1, RIGHT = 2};
@@ -1160,6 +1162,8 @@ I might want to considered some "inertia" factor for my\_car to stay in a lane f
 
 Here are the parameters for the path planner.
 
+The source code is in ./src/parameters.h
+
 `car-constants`:
 
     #ifndef PARAMETERS
@@ -1236,9 +1240,9 @@ Here are the parameters for the path planner.
 The following are lower level supporting functions and the actual main program construction.
 
 
-## Kinematic modules
+## kinematic module
 
-Computes kinematics with my\_car and in relationship to the other cars
+Computes kinematics with my\_car and in relationship to the other cars, in file ./src/kinematics.h
 
 `kinematics-module`:
 
@@ -1249,7 +1253,9 @@ Computes kinematics with my\_car and in relationship to the other cars
     <<kinematic_required_behind>>
 
 
-## maneuvers modules
+## maneuvers module
+
+It's in ./src/maneuvers.h for selecting the appropriate maneuver.
 
 `maneuvers-module`:
 
@@ -1263,7 +1269,9 @@ Computes kinematics with my\_car and in relationship to the other cars
     <<maneuver>>
 
 
-## trajectory modules
+## trajectory module
+
+In ./src/trajectory.h to generate new trajectory.
 
 `trajectory-module`:
 
@@ -1273,7 +1281,7 @@ Computes kinematics with my\_car and in relationship to the other cars
 
 ## Assembly Decorations
 
-Here it assembles the required modules of kinematics, maneuvers, and trajectory
+Here it assembles the required modules of kinematics, maneuvers, and trajectory in ./src/main.cpp
 
 `includes`:
 
@@ -1320,6 +1328,8 @@ Here it assembles the required modules of kinematics, maneuvers, and trajectory
 
 
 ## main
+
+This is the main function in ./src/main.cpp
 
 
 ### load-waypoint-data

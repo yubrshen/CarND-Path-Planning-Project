@@ -165,6 +165,7 @@ The congestion with the nearest vehicle would be used to compute the cost of col
 The distance would be calculated based on the time horizon when the new trajectory would start to be used, till the end of the new
 trajectory.
 
+The source code is ./src/data_model.h
 
 #+NAME:path-planner-data-model-declaration
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/data_model.h :main no
@@ -1189,6 +1190,8 @@ It models the degree of congestion with the nearest car behind and in front.
 
 Here are the parameters for the path planner.
 
+The source code is in ./src/parameters.h
+
 #+NAME:car-constants
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/parameters.h :main no
   #ifndef PARAMETERS
@@ -1264,9 +1267,9 @@ Here are the parameters for the path planner.
 
   The following are lower level supporting functions and the actual main program construction.
 
-** Kinematic modules
+** kinematic module
 
-   Computes kinematics with my_car and in relationship to the other cars
+   Computes kinematics with my_car and in relationship to the other cars, in file ./src/kinematics.h
 
 #+NAME:kinematics-module
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/kinematics.h :main no
@@ -1277,7 +1280,9 @@ Here are the parameters for the path planner.
   <<kinematic_required_behind>>
 #+END_SRC
 
-** maneuvers modules
+** maneuvers module
+
+It's in ./src/maneuvers.h for selecting the appropriate maneuver.
 
 #+NAME:maneuvers-module
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/maneuvers.h :main no
@@ -1291,7 +1296,9 @@ Here are the parameters for the path planner.
   <<maneuver>>
 #+END_SRC
 
-** trajectory modules
+** trajectory module
+
+In ./src/trajectory.h to generate new trajectory.
 
 #+NAME:trajectory-module
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/trajectory.h :main no
@@ -1300,7 +1307,7 @@ Here are the parameters for the path planner.
 #+END_SRC
 
 ** Assembly Decorations
-  Here it assembles the required modules of kinematics, maneuvers, and trajectory
+  Here it assembles the required modules of kinematics, maneuvers, and trajectory in ./src/main.cpp
 
    #+NAME:includes
    #+BEGIN_SRC C++ :noweb tangle :tangle
@@ -1346,6 +1353,8 @@ Here are the parameters for the path planner.
 
 #+END_SRC
 ** main
+
+   This is the main function in ./src/main.cpp
 
 *** load-waypoint-data
 
