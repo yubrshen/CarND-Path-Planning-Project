@@ -293,7 +293,7 @@ Finally, we join the adopted portion of the remaining trajectory and the newly g
 
     DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, start_time, end_time);
 
-    Decision decision = maneuver(my_car, data_lanes);
+    Decision decision = maneuver_f(my_car, data_lanes);
 
     // default values for the start of the new trajectory, applicable when there is not enough remaining_trajectory
     double start_s   = my_car.s;
@@ -505,8 +505,12 @@ The need for refined resolution of the distance and the time reaching the thresh
 
 #+NAME:parse-fusion-data-declaration
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+  enum DIRECTION {LEFT = 1, RIGHT = 2};
+
+  enum MANEUVER {KL=1, LCL=2, LCR=3, PLCL=4, PLCR=5};
+
   // Parse the sensor_fusion data
-  string state_str(MANEUVER_STATE state) {
+  string state_str(MANEUVER state) {
     switch(int(state)) {
     case int(KL):
       return "KL";
@@ -532,7 +536,7 @@ The need for refined resolution of the distance and the time reaching the thresh
 
   struct Decision {
     int    lane_index_changed_to; // note, for prepare to change lane, it's not changed actually
-    MANEUVER_STATE maneuver;
+    MANEUVER maneuver;
     // double velocity_delta;
     double cost;
     KINEMATIC_DATA projected_kinematics; // for key: "velocity", and "acceleration"
@@ -768,19 +772,25 @@ the distance becomes not acceptable.
      }
    #+END_SRC
 
-** evaluate_decision
 ** maneuver
 
    This is the top level program to consider applicable options and select the one with the lowest cost.
+It outputs in terms of a structure =Decision=.
 
 The structure Decision represent all the consequence of a maneuver decision including
-- the targeted acceleration,
-- lane changed into, etc.
+- the targeted velocity,  acceleration,
+- the target lane changed into, etc.
+
+It only considers that the lanes that are consider to be safe at the time of the beginning of the new planned trajectory.
+
+For each plausible maneuver options, =evaluate_decision= performs the analysis and outputs the details of the decision, and also provides the cost of the decision.
+
+Then the decision with the lowest cost will be selected as the decision.
 
 #+NAME:maneuver
 #+BEGIN_SRC C++ :noweb no :tangle :exports none
-  Decision maneuver(Car my_car, DATA_LANES data_lanes) {
-    vector<MANEUVER_STATE> states;
+  Decision maneuver_f(Car my_car, DATA_LANES data_lanes) {
+    vector<MANEUVER> states;
     if (!data_lanes.car_crashing_front_or_behind) {
       states.push_back(KL);
     }
@@ -795,12 +805,15 @@ The structure Decision represent all the consequence of a maneuver decision incl
         states.push_back(LCR);
       }
     }
-    map<MANEUVER_STATE, Decision> decisions;
-    for (auto proposed_state:states) {
-      Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-      cout << setw(5) << state_str(proposed_state) << ", cost: "
-           << setw(5) <<  a_decision.cost << " | ";
-      decisions[proposed_state] = a_decision;
+    map<MANEUVER, Decision> decisions;
+    for (auto proposed_maneuver:states) {
+      // Decision a_decision = evaluate_decision(proposed_maneuver, my_car, data_lanes);
+      Decision decision = project_maneuver(proposed_maneuver, my_car, data_lanes);
+      decision.cost = calculate_cost(decision, my_car, data_lanes);
+
+      cout << setw(5) << state_str(proposed_maneuver) << ", cost: "
+           << setw(5) <<  decision.cost << " | ";
+      decisions[proposed_maneuver] = decision;
     }
 
     Decision decision = min_map_element(decisions)->second;
@@ -811,30 +824,16 @@ The structure Decision represent all the consequence of a maneuver decision incl
   }
 #+END_SRC
 
-** evaluate_decision
-
-This function drives the computation of the costs of the options.
-
-#+NAME:evaluate_decision
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-
-  Decision evaluate_decision(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
-    Decision decision = project_maneuver(proposed_state, my_car, data_lanes);
-    decision.cost = calculate_cost(decision, my_car, data_lanes);
-    return decision;
-  }
-#+END_SRC
-
-*** project_maneuver:
+** project_maneuver:
 Compute the decision should the maneuver is performed.
 
 #+NAME:project_maneuver
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  Decision project_maneuver(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
+  Decision project_maneuver(MANEUVER proposed_maneuver, Car my_car, DATA_LANES data_lanes) {
     Decision decision;
     int changed_lane = my_car.lane_index;
 
-    switch(int(proposed_state)) {
+    switch(int(proposed_maneuver)) {
     case int(KL):
       decision.projected_kinematics = kinematic_required_in_front(my_car, data_lanes, my_car.lane_index);
       decision.lane_index_changed_to = my_car.lane_index;
@@ -860,25 +859,30 @@ Compute the decision should the maneuver is performed.
       decision.projected_kinematics = kinematic_required_behind(my_car, data_lanes, my_car.lane_index +1);
       break;
     default:
-      cout << "Not supported proposed state: " << proposed_state << endl;
+      cout << "Not supported proposed state: " << proposed_maneuver << endl;
       break;
     };
-    decision.maneuver = proposed_state;
+    decision.maneuver = proposed_maneuver;
     cout // <<  "prop. man.: "
          << setw(5) << state_str(decision.maneuver) << ", " << " to: " << decision.lane_index_changed_to << ", ";
     return decision;              // this decision's state needs to be evaluated
   }
 #+END_SRC
-*** kinematic_required_in_front
+** kinematic_required_in_front
 
-    Calculate at the start of new trajectory, the required and permitted (maximum) acceleration and speed.
+    Calculate at the start of new trajectory, the required and permitted (maximum) velocity and acceleration and speed.
 
-    It's not reasonable to expect the car to accelerate/deacceleration within one update interval. This is the root cause of
+    All the expected kinematic data of interests are stored in the structure KINEMATIC. It's the type of the return value.
+
+    The target velocity will be computed. It's needed as the target speed to adjust my_car's speed in the new trajectory
+    generation in =trajectory_f=, when my_car change lane.
+
+    It's not reasonable to expect the car to accelerate/deacceleration within one update interval. This might be the root cause of
     the car jerks too often. It's reasonable to assume that a car would be able to adjust the speed in a few seconds.
     I'd experiment with 5 seconds. I call this the planning horizon. I should use consistently wherever applicable.
     This is the time period that a reasonable car should be adjust its speed to the range desirable.
 
-    I may want to change the gap_front to be constant of the current update
+    This is an experimental design. I have not found better approximation yet given the time limit.
 
 #+NAME:kinematic_required_in_front
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
@@ -890,6 +894,8 @@ Compute the decision should the maneuver is performed.
     kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
     kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
     double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
+    // assuming an average speed, an approximation in order to estimate my_car_s position
+    // at the end of the horizon
     double projected_front_car_s
       = data_lanes.lanes[lane_changed_to].nearest_front.s
       + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
@@ -944,42 +950,63 @@ Compute the decision should the maneuver is performed.
 #+END_SRC
 
 
-*** kinematic_required_behind
+** kinematic_required_behind
 
-    #+NAME:kinematic_required_behind
-    #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-      //map<string, double>
-      KINEMATIC_DATA kinematic_required_behind
-      (Car my_car, DATA_LANES data_lanes, int lane_index) {
-        KINEMATIC_DATA kinematic;
-        if (data_lanes.lanes[lane_index].nearest_back.empty) {
-          kinematic.a = my_car.a;
-          kinematic.v = my_car.v;
-        } else {
-          double gap_behind = my_car.s - data_lanes.lanes[lane_index].nearest_back.s;
-          if (gap_behind <= 0) { // invalid with assumption that the other car is behind
-            kinematic.a = my_car.a;
-            kinematic.v = my_car.v;
-          } else {
-            double delta_v =
-              my_car.v - data_lanes.lanes[lane_index].nearest_back.v;
-            double min_acceleration_pushed_by_nearest_back =
-              (delta_v*delta_v)/(2*gap_behind);
-            kinematic.a =
-              min(min_acceleration_pushed_by_nearest_back,
-                  my_car.a + MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
-            kinematic.v = min(data_lanes.lanes[lane_index].nearest_front.v,
-                              my_car.v + kinematic.a * UPDATE_INTERVAL); // kinematic.v is used per UPDATE_INTERVAL
-          }}
-        update_gaps_in_kinematic(data_lanes.lanes[lane_index].nearest_front,
-                                 my_car,
-                                 data_lanes.lanes[lane_index].nearest_back,
-                                 10*UPDATE_INTERVAL, &kinematic);
-        return kinematic;
-      }
-    #+END_SRC
+   This calculates the minimum acceleration and velocity required in order to be crashed by the nearest car behind my_car.
 
-*** calculate_cost
+   It's currently no being used, as the maneuvers of PLCL and PLCR (prepare change lane left/right) are not being considered.
+
+   #+NAME:kinematic_required_behind
+   #+BEGIN_SRC C++ :noweb yes :tangle :exports none
+     //map<string, double>
+     KINEMATIC_DATA kinematic_required_behind
+     (Car my_car, DATA_LANES data_lanes, int lane_index) {
+       KINEMATIC_DATA kinematic;
+       if (data_lanes.lanes[lane_index].nearest_back.empty) {
+         kinematic.a = my_car.a;
+         kinematic.v = my_car.v;
+       } else {
+         double gap_behind = my_car.s - data_lanes.lanes[lane_index].nearest_back.s;
+         if (gap_behind <= 0) { // invalid with assumption that the other car is behind
+           kinematic.a = my_car.a;
+           kinematic.v = my_car.v;
+         } else {
+           double delta_v =
+             my_car.v - data_lanes.lanes[lane_index].nearest_back.v;
+           double min_acceleration_pushed_by_nearest_back =
+             (delta_v*delta_v)/(2*gap_behind);
+           kinematic.a =
+             min(min_acceleration_pushed_by_nearest_back,
+                 my_car.a + MAX_ACCELERATION_DELTA_METERS_PER_UPDATE_INTERVAL);
+           kinematic.v = min(data_lanes.lanes[lane_index].nearest_front.v,
+                             my_car.v + kinematic.a * UPDATE_INTERVAL); // kinematic.v is used per UPDATE_INTERVAL
+         }}
+       update_gaps_in_kinematic(data_lanes.lanes[lane_index].nearest_front,
+                                my_car,
+                                data_lanes.lanes[lane_index].nearest_back,
+                                10*UPDATE_INTERVAL, &kinematic);
+       return kinematic;
+     }
+   #+END_SRC
+
+** calculate_cost
+
+   For a maneuver, the following costs show in the code are evaluated.
+Considering all possible costs:
+- collision
+- buffer_cost
+- inefficiency_cost
+- not_middle_cost: encourage to be in the middle lane
+- lane_change_extra_cost: model the extra risk and inconvenience in changing lane
+
+Add all of them together.
+
+The data required:
+- projected speed of my_car with the maneuver, based on the projected acceleration/speed
+- distance to the car in front, or behind (closest_approach), based on data_lanes data structure
+- the time to collision, based on the projected acceleration and data_lanes (not yet fully considered successfully)
+
+
 #+NAME:calculate_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
   double calculate_cost(Decision decision, Car my_car, DATA_LANES data_lanes) {
@@ -997,53 +1024,14 @@ Compute the decision should the maneuver is performed.
   }
 #+END_SRC
 
-*** collision_cost
+** collision_cost
 
     Use the current acceleration and velocity of my_car to asses collision risk in more realistic than using those the projected ones.
 
 #+NAME:collision_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  vector<double> solv_2nd_degree_poly(double a, double b, double c) {
-    double d  = sqrt(b*b -4*a*c);
-    double s1 = (-b + d)/(2*a);
-    double s2 = (-b - d)/(2*a);
-    return {s1, s2};
-  }
-
-  double collision_time_in_future(double a, double b, double c, double horizon) {
-    vector<double> candidates = solv_2nd_degree_poly(a, b, c);
-    double s0 = candidates[0] + horizon;
-    double s1 = candidates[1] + horizon;
-    double s  = SAFE_DISTANCE;
-    if (0 <= s0) {
-      s = s0;
-    }
-    if ((0 <= s1) && (s1 < s)) {
-      s = s1;
-    }
-    return s;
-  }
-
-  double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
-    double front_collision_cost  = 0;
-    double behind_collision_cost = 0;
-    double gap_front_0  = SAFE_DISTANCE;
-    double gap_behind_0 = SAFE_DISTANCE;
-
-    if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
-      gap_front_0 = (data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s - my_car.s);
-    }
-
-    if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty) {
-      gap_behind_0 = (my_car.s - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s);
-    }
-    // cout << " lane studied: " << decision.lane_index_changed_to << ", ";
-
-    // if ((SAFE_DISTANCE <= decision.projected_kinematics.gap_front) &&
-    //     (SAFE_DISTANCE <= decision.projected_kinematics.gap_behind)) {
-    //   // for the case, when there is no car in front or behind
-    //   return 0;
-    // }
+  double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
+  {
     if (data_lanes.car_crashing_front_or_behind)
       {
         return 1.0;
@@ -1051,57 +1039,14 @@ Compute the decision should the maneuver is performed.
       {
         return 0.0;
       }
-    // if ((SAFE_DISTANCE <= gap_front_0) &&
-    //     (SAFE_DISTANCE <= gap_behind_0)) {
-    //   // for the case, when there is no car in front or behind
-    //   // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
-    //   return 0;
-    // }
-    // if (gap_front_0  < BUFFER_ZONE ||
-    //     gap_behind_0 < BUFFER_ZONE) {
-    //   cout << " too close, ";
-    //   return 2.0;
-    // }
-
-    // evaluate collision risk with the projected accelerate and speed
-    // over a period of horizon
-    // double a_f = 0.5*decision.projected_kinematics.a;
-    // double a_f   = 0.5*my_car.a;
-    // // double b_f = decision.projected_kinematics.v
-    // double b_f   = my_car.v
-    //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
-    // double c_f   = my_car.s
-    //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
-    // double front_collision_time
-    //   //  = collision_time_in_future(a_f, b_f, c_f, decision.projected_kinematics.horizon);
-    //   = collision_time_in_future(a_f, b_f, c_f, 0.0);
-
-    // front_collision_cost = exp(-pow(front_collision_time, 2));
-    // cout << " coll. in front in " << front_collision_time << " sec. ";
-
-    // // double a_b = 0.5*decision.projected_kinematics.a;
-    // double a_b = 0.5*my_car.a;
-    // // double b_b = decision.projected_kinematics.v
-    // double b_b = my_car.v
-    //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.v;
-    // double c_b = my_car.s
-    //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
-    // double behind_collision_time
-    //   //  = collision_time_in_future(a_b, b_b, c_b, decision.projected_kinematics.horizon);
-    //   = collision_time_in_future(a_b, b_b, c_b, 0.0);
-    // behind_collision_cost = exp(-pow(behind_collision_time, 2));
-    // // cout << " coll. behind in " << behind_collision_time << " sec. ";
-
-    // double cost = front_collision_cost + 1.0*behind_collision_cost; // rear collision is less risky
-    // return cost;
   }
-
-  // I'm confused with case of PLCL, and PLCR, on which lane, the collision risk is accessed?
-  // It should be on the current lane, not the contemplating lane.
-  // Need to double check.
 #+END_SRC
 
-*** inefficiency_cost
+** inefficiency_cost
+
+Model the extent how much my_car's velocity can reach the speed limit.
+It calculates the difference between the speed limit and my_car's projected speed by the maneuver.
+
 #+NAME:inefficiency_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
   double inefficiency_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
@@ -1113,7 +1058,9 @@ Compute the decision should the maneuver is performed.
   }
 #+END_SRC
 
-*** buffer_cost
+** buffer_cost
+
+It models the degree of congestion with the nearest car behind and in front.
 
 #+NAME:buffer_cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
@@ -1121,39 +1068,14 @@ Compute the decision should the maneuver is performed.
   { // express the requirements that both the gap_front and gap_behind should be
     // larger or equal to SAFE_DISTANCE.
 
-    // assume gap_front and gap_behind are non-negative
-    // double cost_front = 0;
-    // if (data_lanes.lanes[my_car.lane_index].gap_front < SAFE_DISTANCE)
-    //   {
-    //   cost_front = exp(-data_lanes.lanes[my_car.lane_index].gap_front);
-    //   }
-    // double cost_behind = 0;
-    // if (data_lanes.lanes[my_car.lane_index].gap_behind < SAFE_DISTANCE)
-    //   {
-    //     cost_behind = exp(-data_lanes.lanes[my_car.lane_index].gap_behind);
-    //   }
     double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
     double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
     return cost_front + 1.0 * cost_behind; // might want to consider if the gap_front should have bigger weight.
   }
 #+END_SRC
 
-calculate_cost:
-Considering all possible costs:
-- collision
-- buffer_cost
-- inefficiency_cost
-- discomfort_cost (maybe)
 
-add them together.
-
-The data required:
-- future speed of my_car with the maneuver, based on the projected acceleration
-- distance to the car in front, or behind (closest_approach), based on data_lanes
-- the time to collision, based on the projected acceleration and data_lanes
-
-
-*** not-middle-cost
+** not-middle-cost
 
 #+NAME:not-middle-cost
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
@@ -1163,7 +1085,11 @@ The data required:
   }
 #+END_SRC
 
-*** lane_change_extra_cost_f
+** lane_change_extra_cost_f
+
+   model the observation that the ease of changing lane is proportional to the speed of my_car.
+
+   I might want to considered some "inertia" factor for my_car to stay in a lane for a while after changing into the lane.
 
 #+NAME:lane_change_extra_cost_f
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
@@ -1178,17 +1104,19 @@ The data required:
 
 * Performance
 
-  The path planner can drive the car to run full lapse of the track. Most of the time the car runs steady.
+  The path planner can drive the car to run multiple full lapses of the track. Most of the time the car runs steady.
 But sometimes, it has problem of exceeding the speed limits, and may have some exceeding the jerk limit.
-
-Eventually, the car would stop with the simulator showing a message "Max Jerk Exceeded".
-This is a problem that I have not figured out how to resolve it.
+Occasionally, it might even have collision.
 
 * Further investigation
 
 1. Need to explore how to have better algorithm of the speed control to avoid the problems of exceeding jerk limit.
-2. Investigate the solutions to the problem that the car would eventually stall with message of "Max Jerk Exceeded".
+   Maybe, the criterion whether to adopt the velocity of the car in front can be typed to certain threshold of
+   the congestion in the lane between my_car and the one in front. For example, the congestion value when the front car is
+   slower and the distance at the start_time of the new trajectory to be equal to SAFE_DISTANCE.
 
+2. The adjustment increment of velocity VELOCITY_INCREMENT is very sensitive to the stability of the my_car driving. More
+   study is needed.
 
 ** Overall design decisions
 
@@ -1251,7 +1179,7 @@ This is a problem that I have not figured out how to resolve it.
    It will be less likely, and will be a refinement to do in the future.
 
 
-* Code
+* Supporting functions
 
 ** Decorations
    Necessary decorations to make the code compile.
@@ -1286,15 +1214,26 @@ This is a problem that I have not figured out how to resolve it.
      using json = nlohmann::json;
 
    #+END_SRC
-** Interaction with Simulator
-*** check if simulator sends data
+** support-to-maneuver
 
-** types-related
-#+NAME:types-related
+#+NAME:support-to-maneuver
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  enum DIRECTION {LEFT = 1, RIGHT = 2};
+  template <typename T>
+  void vector_remove(vector<T> & a_vector, T value) {
+    a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
+  }
 
-  enum MANEUVER_STATE {KL=1, LCL=2, LCR=3, PLCL=4, PLCR=5};
+  template <typename T>
+  typename T::iterator min_map_element(T& m) {
+    return min_element(m.begin(), m.end(),
+                       [](typename T::value_type& l,
+                          typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
+  }
+
+  // constexpr unsigned int str2int(const char* str, int h = 0)
+  // {
+  //   return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
+  // }
 
 #+END_SRC
 
@@ -1364,29 +1303,6 @@ This is a problem that I have not figured out how to resolve it.
   my_car.jerk = 0;
 
 #+END_SRC
-** support-to-maneuver
-
-#+NAME:support-to-maneuver
-#+BEGIN_SRC C++ :noweb yes :tangle :exports none
-  template <typename T>
-  void vector_remove(vector<T> & a_vector, T value) {
-    a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
-  }
-
-  template <typename T>
-  typename T::iterator min_map_element(T& m) {
-    return min_element(m.begin(), m.end(),
-                       [](typename T::value_type& l,
-                          typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
-  }
-
-  // constexpr unsigned int str2int(const char* str, int h = 0)
-  // {
-  //   return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
-  // }
-
-#+END_SRC
-
 ** interpolate_points_function
 
 #+NAME:interpolate_points_function
@@ -1429,7 +1345,6 @@ This is a problem that I have not figured out how to resolve it.
     return output;
   }
     #+END_SRC
-
 
 ** main
 
@@ -1612,15 +1527,11 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
 #+NAME:main.cpp
 #+BEGIN_SRC C++ :noweb yes :tangle ./src/main.cpp :exports none
   <<decorations>>
-  <<types-related>>
-  <<interpolate_points_function>>
   <<parse-fusion-data-declaration>>
+  <<interpolate_points_function>>
   <<projected_gap>>
   <<congestion>>
   <<parse-fusion-data>>
-  <<support-to-maneuver>>
-  <<lane_keep_cost>>
-  <<lane_change_cost>>
   <<kinematic_required_in_front>>
   <<kinematic_required_behind>>
   <<project_maneuver>>
@@ -1631,7 +1542,7 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
   <<not-middle-cost>>
   <<lane_change_extra_cost_f>>
   <<calculate_cost>>
-  <<evaluate_decision>>
+  <<support-to-maneuver>>
   <<maneuver>>
   <<refine_maps>>
   <<trajectory>>
@@ -1718,6 +1629,7 @@ Also the lane line is not quite persistent.
 May need to consider the duration to be larger to provide more realistic view of the surrounding.
 Need to fix the problem that the maneuver selection does not make sense, by reviewing the cost functions' design.
 
+* Old code yard
 #+NAME:shortest_path
 #+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
 double shortest_distance(Car front, Car behind, double start_time, double end_time)
@@ -1791,4 +1703,108 @@ double const ONE_OVER_ADJUSTMENT_INTERVAL = 1/SPEED_ADJUSTMENT_PERIOD;
 //                            10*UPDATE_INTERVAL, &kinematic);
 //   return kinematic;
 // }
+#+END_SRC
+
+#+NAME:support-to-collision-cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
+vector<double> solv_2nd_degree_poly(double a, double b, double c) {
+  double d  = sqrt(b*b -4*a*c);
+  double s1 = (-b + d)/(2*a);
+  double s2 = (-b - d)/(2*a);
+  return {s1, s2};
+}
+
+double collision_time_in_future(double a, double b, double c, double horizon) {
+  vector<double> candidates = solv_2nd_degree_poly(a, b, c);
+  double s0 = candidates[0] + horizon;
+  double s1 = candidates[1] + horizon;
+  double s  = SAFE_DISTANCE;
+  if (0 <= s0) {
+    s = s0;
+  }
+  if ((0 <= s1) && (s1 < s)) {
+    s = s1;
+  }
+  return s;
+}
+#+END_SRC
+
+#+NAME:old-collision-cost
+#+BEGIN_SRC C++ :noweb yes :tangle :exports none :main no
+double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
+  double front_collision_cost  = 0;
+  double behind_collision_cost = 0;
+  double gap_front_0  = SAFE_DISTANCE;
+  double gap_behind_0 = SAFE_DISTANCE;
+
+  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
+    gap_front_0 = (data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s - my_car.s);
+  }
+
+  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty) {
+    gap_behind_0 = (my_car.s - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s);
+  }
+  // cout << " lane studied: " << decision.lane_index_changed_to << ", ";
+
+  // if ((SAFE_DISTANCE <= decision.projected_kinematics.gap_front) &&
+  //     (SAFE_DISTANCE <= decision.projected_kinematics.gap_behind)) {
+  //   // for the case, when there is no car in front or behind
+  //   return 0;
+  // }
+  if (data_lanes.car_crashing_front_or_behind)
+    {
+      return 1.0;
+    } else
+    {
+      return 0.0;
+    }
+  // if ((SAFE_DISTANCE <= gap_front_0) &&
+  //     (SAFE_DISTANCE <= gap_behind_0)) {
+  //   // for the case, when there is no car in front or behind
+  //   // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
+  //   return 0;
+  // }
+  // if (gap_front_0  < BUFFER_ZONE ||
+  //     gap_behind_0 < BUFFER_ZONE) {
+  //   cout << " too close, ";
+  //   return 2.0;
+  // }
+
+  // evaluate collision risk with the projected accelerate and speed
+  // over a period of horizon
+  // double a_f = 0.5*decision.projected_kinematics.a;
+  // double a_f   = 0.5*my_car.a;
+  // // double b_f = decision.projected_kinematics.v
+  // double b_f   = my_car.v
+  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
+  // double c_f   = my_car.s
+  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
+  // double front_collision_time
+  //   //  = collision_time_in_future(a_f, b_f, c_f, decision.projected_kinematics.horizon);
+  //   = collision_time_in_future(a_f, b_f, c_f, 0.0);
+
+  // front_collision_cost = exp(-pow(front_collision_time, 2));
+  // cout << " coll. in front in " << front_collision_time << " sec. ";
+
+  // // double a_b = 0.5*decision.projected_kinematics.a;
+  // double a_b = 0.5*my_car.a;
+  // // double b_b = decision.projected_kinematics.v
+  // double b_b = my_car.v
+  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.v;
+  // double c_b = my_car.s
+  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
+  // double behind_collision_time
+  //   //  = collision_time_in_future(a_b, b_b, c_b, decision.projected_kinematics.horizon);
+  //   = collision_time_in_future(a_b, b_b, c_b, 0.0);
+  // behind_collision_cost = exp(-pow(behind_collision_time, 2));
+  // // cout << " coll. behind in " << behind_collision_time << " sec. ";
+
+  // double cost = front_collision_cost + 1.0*behind_collision_cost; // rear collision is less risky
+  // return cost;
+}
+
+// I'm confused with case of PLCL, and PLCR, on which lane, the collision risk is accessed?
+// It should be on the current lane, not the contemplating lane.
+// Need to double check.
+
 #+END_SRC

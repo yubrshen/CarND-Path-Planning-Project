@@ -27,47 +27,10 @@ using json = nlohmann::json;
 
 enum DIRECTION {LEFT = 1, RIGHT = 2};
 
-enum MANEUVER_STATE {KL=1, LCL=2, LCR=3, PLCL=4, PLCR=5};
+enum MANEUVER {KL=1, LCL=2, LCR=3, PLCL=4, PLCR=5};
 
-vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
-                                  vector<double> eval_at_x) {
-  // uses the spline library to interpolate points connecting a series of x and y values
-  // output is spline evaluated at each eval_at_x point
-
-  if (pts_x.size() != pts_y.size()) {
-    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
-    return { 0 };
-  }
-
-  tk::spline s;
-  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
-  vector<double> output;
-  for (double x: eval_at_x) {
-    output.push_back(s(x));
-  }
-  return output;
-}
-
-vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
-                                  double interval, int output_size) {
-  // uses the spline library to interpolate points connecting a series of x and y values
-  // output is output_size number of y values beginning at y[0] with specified fixed interval
-
-  if (pts_x.size() != pts_y.size()) {
-    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
-    return { 0 };
-  }
-
-  tk::spline s;
-  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
-  vector<double> output;
-  for (int i = 0; i < output_size; i++) {
-    output.push_back(s(pts_x[0] + i * interval));
-  }
-  return output;
-}
 // Parse the sensor_fusion data
-string state_str(MANEUVER_STATE state) {
+string state_str(MANEUVER state) {
   switch(int(state)) {
   case int(KL):
     return "KL";
@@ -93,7 +56,7 @@ struct KINEMATIC_DATA {
 
 struct Decision {
   int    lane_index_changed_to; // note, for prepare to change lane, it's not changed actually
-  MANEUVER_STATE maneuver;
+  MANEUVER maneuver;
   // double velocity_delta;
   double cost;
   KINEMATIC_DATA projected_kinematics; // for key: "velocity", and "acceleration"
@@ -140,6 +103,43 @@ struct TRAJECTORY {
 };
 
 typedef vector< vector<double> > SENSOR_FUSION;
+vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
+                                  vector<double> eval_at_x) {
+  // uses the spline library to interpolate points connecting a series of x and y values
+  // output is spline evaluated at each eval_at_x point
+
+  if (pts_x.size() != pts_y.size()) {
+    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
+    return { 0 };
+  }
+
+  tk::spline s;
+  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
+  vector<double> output;
+  for (double x: eval_at_x) {
+    output.push_back(s(x));
+  }
+  return output;
+}
+
+vector<double> interpolate_points(vector<double> pts_x, vector<double> pts_y,
+                                  double interval, int output_size) {
+  // uses the spline library to interpolate points connecting a series of x and y values
+  // output is output_size number of y values beginning at y[0] with specified fixed interval
+
+  if (pts_x.size() != pts_y.size()) {
+    cout << "ERROR! SMOOTHER: interpolate_points size mismatch between pts_x and pts_y" << endl;
+    return { 0 };
+  }
+
+  tk::spline s;
+  s.set_points(pts_x,pts_y);    // currently it is required that X is already sorted
+  vector<double> output;
+  for (int i = 0; i < output_size; i++) {
+    output.push_back(s(pts_x[0] + i * interval));
+  }
+  return output;
+}
 double projected_gap_front(double front_s, double front_v,
                            double behind_s, double behind_v, double behind_a,
                            double delta_t)
@@ -339,25 +339,6 @@ DATA_LANES parse_sensor_data(Car my_car, SENSOR_FUSION sensor_fusion, double sta
   }
   return data_lanes;
 }
-template <typename T>
-void vector_remove(vector<T> & a_vector, T value) {
-  a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
-}
-
-template <typename T>
-typename T::iterator min_map_element(T& m) {
-  return min_element(m.begin(), m.end(),
-                     [](typename T::value_type& l,
-                        typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
-}
-
-// constexpr unsigned int str2int(const char* str, int h = 0)
-// {
-//   return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
-// }
-
-
-
 
 
 KINEMATIC_DATA kinematic_required_in_front
@@ -366,6 +347,8 @@ KINEMATIC_DATA kinematic_required_in_front
   kinematic.v = SPEED_LIMIT; // assuming there is no car in front.
   kinematic.horizon = 200*UPDATE_INTERVAL; // 4 seconds
   double projected_my_car_s    = my_car.s + kinematic.horizon*(my_car.v + kinematic.v)/2;
+  // assuming an average speed, an approximation in order to estimate my_car_s position
+  // at the end of the horizon
   double projected_front_car_s
     = data_lanes.lanes[lane_changed_to].nearest_front.s
     + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
@@ -407,11 +390,11 @@ KINEMATIC_DATA kinematic_required_behind
                            10*UPDATE_INTERVAL, &kinematic);
   return kinematic;
 }
-Decision project_maneuver(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
+Decision project_maneuver(MANEUVER proposed_maneuver, Car my_car, DATA_LANES data_lanes) {
   Decision decision;
   int changed_lane = my_car.lane_index;
 
-  switch(int(proposed_state)) {
+  switch(int(proposed_maneuver)) {
   case int(KL):
     decision.projected_kinematics = kinematic_required_in_front(my_car, data_lanes, my_car.lane_index);
     decision.lane_index_changed_to = my_car.lane_index;
@@ -437,56 +420,17 @@ Decision project_maneuver(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES 
     decision.projected_kinematics = kinematic_required_behind(my_car, data_lanes, my_car.lane_index +1);
     break;
   default:
-    cout << "Not supported proposed state: " << proposed_state << endl;
+    cout << "Not supported proposed state: " << proposed_maneuver << endl;
     break;
   };
-  decision.maneuver = proposed_state;
+  decision.maneuver = proposed_maneuver;
   cout // <<  "prop. man.: "
        << setw(5) << state_str(decision.maneuver) << ", " << " to: " << decision.lane_index_changed_to << ", ";
   return decision;              // this decision's state needs to be evaluated
 }
 
-vector<double> solv_2nd_degree_poly(double a, double b, double c) {
-  double d  = sqrt(b*b -4*a*c);
-  double s1 = (-b + d)/(2*a);
-  double s2 = (-b - d)/(2*a);
-  return {s1, s2};
-}
-
-double collision_time_in_future(double a, double b, double c, double horizon) {
-  vector<double> candidates = solv_2nd_degree_poly(a, b, c);
-  double s0 = candidates[0] + horizon;
-  double s1 = candidates[1] + horizon;
-  double s  = SAFE_DISTANCE;
-  if (0 <= s0) {
-    s = s0;
-  }
-  if ((0 <= s1) && (s1 < s)) {
-    s = s1;
-  }
-  return s;
-}
-
-double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
-  double front_collision_cost  = 0;
-  double behind_collision_cost = 0;
-  double gap_front_0  = SAFE_DISTANCE;
-  double gap_behind_0 = SAFE_DISTANCE;
-
-  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_front.empty) {
-    gap_front_0 = (data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s - my_car.s);
-  }
-
-  if (!data_lanes.lanes[decision.lane_index_changed_to].nearest_back.empty) {
-    gap_behind_0 = (my_car.s - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s);
-  }
-  // cout << " lane studied: " << decision.lane_index_changed_to << ", ";
-
-  // if ((SAFE_DISTANCE <= decision.projected_kinematics.gap_front) &&
-  //     (SAFE_DISTANCE <= decision.projected_kinematics.gap_behind)) {
-  //   // for the case, when there is no car in front or behind
-  //   return 0;
-  // }
+double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
+{
   if (data_lanes.car_crashing_front_or_behind)
     {
       return 1.0;
@@ -494,69 +438,11 @@ double collision_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes) {
     {
       return 0.0;
     }
-  // if ((SAFE_DISTANCE <= gap_front_0) &&
-  //     (SAFE_DISTANCE <= gap_behind_0)) {
-  //   // for the case, when there is no car in front or behind
-  //   // cout << "gap_front_0: " << setw(7) << gap_front_0 << "; ";
-  //   return 0;
-  // }
-  // if (gap_front_0  < BUFFER_ZONE ||
-  //     gap_behind_0 < BUFFER_ZONE) {
-  //   cout << " too close, ";
-  //   return 2.0;
-  // }
-
-  // evaluate collision risk with the projected accelerate and speed
-  // over a period of horizon
-  // double a_f = 0.5*decision.projected_kinematics.a;
-  // double a_f   = 0.5*my_car.a;
-  // // double b_f = decision.projected_kinematics.v
-  // double b_f   = my_car.v
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.v;
-  // double c_f   = my_car.s
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_front.s + VEHICLE_LENGTH;
-  // double front_collision_time
-  //   //  = collision_time_in_future(a_f, b_f, c_f, decision.projected_kinematics.horizon);
-  //   = collision_time_in_future(a_f, b_f, c_f, 0.0);
-
-  // front_collision_cost = exp(-pow(front_collision_time, 2));
-  // cout << " coll. in front in " << front_collision_time << " sec. ";
-
-  // // double a_b = 0.5*decision.projected_kinematics.a;
-  // double a_b = 0.5*my_car.a;
-  // // double b_b = decision.projected_kinematics.v
-  // double b_b = my_car.v
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.v;
-  // double c_b = my_car.s
-  //   - data_lanes.lanes[decision.lane_index_changed_to].nearest_back.s - VEHICLE_LENGTH;
-  // double behind_collision_time
-  //   //  = collision_time_in_future(a_b, b_b, c_b, decision.projected_kinematics.horizon);
-  //   = collision_time_in_future(a_b, b_b, c_b, 0.0);
-  // behind_collision_cost = exp(-pow(behind_collision_time, 2));
-  // // cout << " coll. behind in " << behind_collision_time << " sec. ";
-
-  // double cost = front_collision_cost + 1.0*behind_collision_cost; // rear collision is less risky
-  // return cost;
 }
-
-// I'm confused with case of PLCL, and PLCR, on which lane, the collision risk is accessed?
-// It should be on the current lane, not the contemplating lane.
-// Need to double check.
 double buffer_cost_f(Decision decision, Car my_car, DATA_LANES data_lanes)
 { // express the requirements that both the gap_front and gap_behind should be
   // larger or equal to SAFE_DISTANCE.
 
-  // assume gap_front and gap_behind are non-negative
-  // double cost_front = 0;
-  // if (data_lanes.lanes[my_car.lane_index].gap_front < SAFE_DISTANCE)
-  //   {
-  //   cost_front = exp(-data_lanes.lanes[my_car.lane_index].gap_front);
-  //   }
-  // double cost_behind = 0;
-  // if (data_lanes.lanes[my_car.lane_index].gap_behind < SAFE_DISTANCE)
-  //   {
-  //     cost_behind = exp(-data_lanes.lanes[my_car.lane_index].gap_behind);
-  //   }
   double cost_front  = data_lanes.lanes[decision.lane_index_changed_to].congestion_front;
   double cost_behind = data_lanes.lanes[decision.lane_index_changed_to].congestion_behind;
   return cost_front + 1.0 * cost_behind; // might want to consider if the gap_front should have bigger weight.
@@ -591,14 +477,25 @@ double calculate_cost(Decision decision, Car my_car, DATA_LANES data_lanes) {
        << " ineff. c: " << setw(3) << inefficiency_cost << ", ";
   return cost;
 }
-
-Decision evaluate_decision(MANEUVER_STATE proposed_state, Car my_car, DATA_LANES data_lanes) {
-  Decision decision = project_maneuver(proposed_state, my_car, data_lanes);
-  decision.cost = calculate_cost(decision, my_car, data_lanes);
-  return decision;
+template <typename T>
+void vector_remove(vector<T> & a_vector, T value) {
+  a_vector.erase(std::remove(a_vector.begin(), a_vector.end(), value), a_vector.end());
 }
-Decision maneuver(Car my_car, DATA_LANES data_lanes) {
-  vector<MANEUVER_STATE> states;
+
+template <typename T>
+typename T::iterator min_map_element(T& m) {
+  return min_element(m.begin(), m.end(),
+                     [](typename T::value_type& l,
+                        typename T::value_type& r) -> bool { return l.second.cost < r.second.cost; });
+}
+
+// constexpr unsigned int str2int(const char* str, int h = 0)
+// {
+//   return !str[h] ? 5381 : (str2int(str, h+1) * 33) ^ str[h];
+// }
+
+Decision maneuver_f(Car my_car, DATA_LANES data_lanes) {
+  vector<MANEUVER> states;
   if (!data_lanes.car_crashing_front_or_behind) {
     states.push_back(KL);
   }
@@ -613,12 +510,15 @@ Decision maneuver(Car my_car, DATA_LANES data_lanes) {
       states.push_back(LCR);
     }
   }
-  map<MANEUVER_STATE, Decision> decisions;
-  for (auto proposed_state:states) {
-    Decision a_decision = evaluate_decision(proposed_state, my_car, data_lanes);
-    cout << setw(5) << state_str(proposed_state) << ", cost: "
-         << setw(5) <<  a_decision.cost << " | ";
-    decisions[proposed_state] = a_decision;
+  map<MANEUVER, Decision> decisions;
+  for (auto proposed_maneuver:states) {
+    // Decision a_decision = evaluate_decision(proposed_maneuver, my_car, data_lanes);
+    Decision decision = project_maneuver(proposed_maneuver, my_car, data_lanes);
+    decision.cost = calculate_cost(decision, my_car, data_lanes);
+
+    cout << setw(5) << state_str(proposed_maneuver) << ", cost: "
+         << setw(5) <<  decision.cost << " | ";
+    decisions[proposed_maneuver] = decision;
   }
 
   Decision decision = min_map_element(decisions)->second;
@@ -733,7 +633,7 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
 
   DATA_LANES data_lanes = parse_sensor_data(my_car, sensor_fusion, start_time, end_time);
 
-  Decision decision = maneuver(my_car, data_lanes);
+  Decision decision = maneuver_f(my_car, data_lanes);
 
   // default values for the start of the new trajectory, applicable when there is not enough remaining_trajectory
   double start_s   = my_car.s;
