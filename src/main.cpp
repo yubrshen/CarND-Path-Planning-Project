@@ -884,7 +884,7 @@ TRAJECTORY trajectory_f(Car my_car, SENSOR_FUSION sensor_fusion, TRAJECTORY rema
   // double prev_updated_s = -MAX_S; // impossibly small
 
   double next_v = start_v;
-  const double VELOCITY_INCREMENT_LIMIT = 0.125;
+  // const double VELOCITY_INCREMENT_LIMIT = 0.125;
   // cout << " next_v: ";
   for (int i = 0; i < new_traj_size; i++) {
     double v_incr = 0;

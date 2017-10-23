@@ -28,7 +28,7 @@ const int NUM_ADOPTED_REMAINING_TRAJECTORY_POINTS = 50; // 3, 30;
 // the length of the first portion of the remaining trajectory (previous_path)
 // from experiment, it seems 25 might be too few when the CPU is busy.
 
-const double VELOCITY_INCREMENT_LIMIT = 0.07; // 0.125;
+const double VELOCITY_INCREMENT_LIMIT = 0.125; // 0.07 not stable
 
 const double MAX_ACCELERATION_METERS_PER_SECOND_SQUARE = 10; // meter/s^2
 const double MAX_VELOCITY_DELTA_PRE_UPDATE_INTERVAL
