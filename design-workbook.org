@@ -781,6 +781,13 @@ the distance becomes not acceptable.
        return c;
      }
 
+     double punished_start_distance_congestion(double dist_start)
+     {
+       double punish_weight = 1.01; // punish further this case
+       double c = punish_weight * start_distance_congestion(dist_start);
+       return c;
+     }
+
      double congestion_f(Car front, Car behind, double start_time, double end_time)
      { // returns the congestion coefficient between the two cars.
        // To simplify, assume they have zero acceleration
@@ -796,9 +803,7 @@ the distance becomes not acceptable.
          { // behind.v > front.v
            if (dist_start <= SAFE_DISTANCE)
              {
-               double punish_weight = 1.01; // punish further this case
-
-               c = punish_weight * start_distance_congestion(dist_start);
+               c = punished_start_distance_congestion(dist_start);
                cout <<  " start_time: " << setw(5) << start_time
                     << ", front slower and start with less safe distance, dist_start: "
                     << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
@@ -933,6 +938,10 @@ Compute the decision should the maneuver is performed.
     The target velocity will be computed. It's needed as the target speed to adjust my_car's speed in the new trajectory
     generation in =trajectory_f=, when my_car change lane.
 
+    Experiment to make the allowed speed to have tighter condition: only when the car in front is slower,
+    and close enough to adopt it's speed.
+
+
     It's not reasonable to expect the car to accelerate/deacceleration within one update interval. This might be the root cause of
     the car jerks too often. It's reasonable to assume that a car would be able to adjust the speed in a few seconds.
     I'd experiment with 5 seconds. I call this the planning horizon. I should use consistently wherever applicable.
@@ -956,8 +965,9 @@ Compute the decision should the maneuver is performed.
       = data_lanes.lanes[lane_changed_to].nearest_front.s
       + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
     double gap_front = projected_front_car_s - projected_my_car_s;
-    if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
-    //if (0.3 < data_lanes.lanes[lane_changed_to].congestion_front)
+    //if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
+    double critical_congestion = punished_start_distance_congestion(SAFE_DISTANCE);
+    if (critical_congestion < data_lanes.lanes[lane_changed_to].congestion_front)
       {
         kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
       }

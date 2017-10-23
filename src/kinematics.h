@@ -52,6 +52,13 @@ double threshold_congestion(double time_threshold, double start_time)
   return c;
 }
 
+double punished_start_distance_congestion(double dist_start)
+{
+  double punish_weight = 1.01; // punish further this case
+  double c = punish_weight * start_distance_congestion(dist_start);
+  return c;
+}
+
 double congestion_f(Car front, Car behind, double start_time, double end_time)
 { // returns the congestion coefficient between the two cars.
   // To simplify, assume they have zero acceleration
@@ -67,9 +74,7 @@ double congestion_f(Car front, Car behind, double start_time, double end_time)
     { // behind.v > front.v
       if (dist_start <= SAFE_DISTANCE)
         {
-          double punish_weight = 1.01; // punish further this case
-
-          c = punish_weight * start_distance_congestion(dist_start);
+          c = punished_start_distance_congestion(dist_start);
           cout <<  " start_time: " << setw(5) << start_time
                << ", front slower and start with less safe distance, dist_start: "
                << setw(7) << dist_start <<  " c: " << setw(7) << c <<"; ";
@@ -227,8 +232,9 @@ KINEMATIC_DATA kinematic_required_in_front
     = data_lanes.lanes[lane_changed_to].nearest_front.s
     + kinematic.horizon*data_lanes.lanes[lane_changed_to].nearest_front.v;
   double gap_front = projected_front_car_s - projected_my_car_s;
-  if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
-  //if (0.3 < data_lanes.lanes[lane_changed_to].congestion_front)
+  //if (!data_lanes.lanes[lane_changed_to].nearest_front.empty && (gap_front < SAFE_DISTANCE))
+  double critical_congestion = punished_start_distance_congestion(SAFE_DISTANCE);
+  if (critical_congestion < data_lanes.lanes[lane_changed_to].congestion_front)
     {
       kinematic.v = data_lanes.lanes[lane_changed_to].nearest_front.v;
     }
