@@ -1291,7 +1291,7 @@ Occasionally, it might even have collision.
 ** Assembly Decorations
   Here it assembles the required modules of kinematics, maneuvers, and trajectory
 
-   #+NAME:decorations
+   #+NAME:includes
    #+BEGIN_SRC C++ :noweb tangle :tangle
      #include <assert.h> // #include <assert> does not work, why?
 
@@ -1487,7 +1487,7 @@ h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
 *** main
 #+NAME:main.cpp
 #+BEGIN_SRC C++ :noweb tangle :tangle ./src/main.cpp
-  <<decorations>>
+  <<includes>>
 
   int main() {
     <<load-waypoint-data>>
